@@ -327,6 +327,8 @@ Shell::Shell(DartVMRef vm, TaskRunners task_runners, Settings settings)
       settings_(std::move(settings)),
       vm_(std::move(vm)),
       is_gpu_disabled_sync_switch_(new fml::SyncSwitch()),
+      resize_task_filter_(std::make_unique<RasterTaskFilter>(
+          task_runners_.GetRasterTaskRunner().get())),
       weak_factory_gpu_(nullptr),
       weak_factory_(this) {
   FML_CHECK(vm_) << "Must have access to VM to create a shell.";
@@ -815,6 +817,44 @@ void Shell::OnPlatformViewDestroyed() {
   }
 }
 
+// TODO(knopp) This class should perhaps be merged with shell
+class RasterTaskFilter {
+ public:
+  explicit RasterTaskFilter(fml::TaskRunner* raster_task_runner)
+      : raster_task_runner_(raster_task_runner) {}
+
+  // Marks the beginning of resize
+  // All rasterize tasks scheduled before now, as well as
+  // tasks that yield tree of different size will be invoked
+  // with DiscardCallback returning true
+  void BeginResize(int width, int height) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    size_ = SkISize::Make(width, height);
+    ++cookie_;
+  }
+
+  // Schedules task on raster thread; If the provided DiscardCallback
+  // returns true while task is being executed, the layer tree
+  // does not need to be rasterized (it is stale, because there is a resize
+  // event in progress)
+  void ScheduleRasterizeTask(
+      std::function<void(Rasterizer::DiscardCallback)>&& fn) {
+    std::scoped_lock<std::mutex> lock(mutex_);
+    raster_task_runner_->PostTask([this, fn = std::move(fn), cookie = cookie_] {
+      fn([&](LayerTree& t) {
+        std::scoped_lock<std::mutex> lock(mutex_);
+        return cookie != cookie_ || t.frame_size() != size_;
+      });
+    });
+  }
+
+ private:
+  std::mutex mutex_;
+  SkISize size_;
+  uint32_t cookie_ = 0;
+  fml::TaskRunner* raster_task_runner_;
+};
+
 // |PlatformView::Delegate|
 void Shell::OnPlatformViewSetViewportMetrics(const ViewportMetrics& metrics) {
   FML_DCHECK(is_setup_);
@@ -822,13 +862,8 @@ void Shell::OnPlatformViewSetViewportMetrics(const ViewportMetrics& metrics) {
 
   // This is the formula Android uses.
   // https://android.googlesource.com/platform/frameworks/base/+/master/libs/hwui/renderthread/CacheManager.cpp#41
-  size_t max_bytes = metrics.physical_width * metrics.physical_height * 12 * 4;
-  task_runners_.GetRasterTaskRunner()->PostTask(
-      [rasterizer = rasterizer_->GetWeakPtr(), max_bytes] {
-        if (rasterizer) {
-          rasterizer->SetResourceCacheMaxBytes(max_bytes, false);
-        }
-      });
+  resource_cache_max_bytes_update_ =
+      metrics.physical_width * metrics.physical_height * 12 * 4;
 
   task_runners_.GetUITaskRunner()->PostTask(
       [engine = engine_->GetWeakPtr(), metrics]() {
@@ -836,6 +871,9 @@ void Shell::OnPlatformViewSetViewportMetrics(const ViewportMetrics& metrics) {
           engine->SetViewportMetrics(metrics);
         }
       });
+
+  resize_task_filter_->BeginResize(metrics.physical_width,
+                                   metrics.physical_height);
 }
 
 // |PlatformView::Delegate|
@@ -1025,13 +1063,19 @@ void Shell::OnAnimatorDraw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline,
     }
   }
 
-  task_runners_.GetRasterTaskRunner()->PostTask(
+  size_t max_bytes = resource_cache_max_bytes_update_;
+  resource_cache_max_bytes_update_ = 0;
+
+  resize_task_filter_->ScheduleRasterizeTask(
       [&waiting_for_first_frame = waiting_for_first_frame_,
        &waiting_for_first_frame_condition = waiting_for_first_frame_condition_,
-       rasterizer = rasterizer_->GetWeakPtr(),
-       pipeline = std::move(pipeline)]() {
+       rasterizer = rasterizer_->GetWeakPtr(), max_bytes,
+       pipeline = std::move(pipeline)](Rasterizer::DiscardCallback discard_cb) {
         if (rasterizer) {
-          rasterizer->Draw(pipeline);
+          if (max_bytes != 0) {
+            rasterizer->SetResourceCacheMaxBytes(max_bytes, false);
+          }
+          rasterizer->Draw(pipeline, std::move(discard_cb));
 
           if (waiting_for_first_frame.load()) {
             waiting_for_first_frame.store(false);
@@ -1045,9 +1089,11 @@ void Shell::OnAnimatorDraw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline,
 void Shell::OnAnimatorDrawLastLayerTree() {
   FML_DCHECK(is_setup_);
 
-  task_runners_.GetRasterTaskRunner()->PostTask(
-      [rasterizer = rasterizer_->GetWeakPtr()]() {
-        if (rasterizer) {
+  resize_task_filter_->ScheduleRasterizeTask(
+      [rasterizer =
+           rasterizer_->GetWeakPtr()](Rasterizer::DiscardCallback discard_cb) {
+        if (rasterizer && rasterizer->GetLastLayerTree() &&
+            !discard_cb(*rasterizer->GetLastLayerTree())) {
           rasterizer->DrawLastLayerTree();
         }
       });

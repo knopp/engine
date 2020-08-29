@@ -139,8 +139,24 @@ static bool OnPresent(FlutterEngine* engine) {
 }
 
 static uint32_t OnFBO(FlutterEngine* engine) {
-  // There is currently no case where a different FBO is used, so no need to forward.
-  return 0;
+  return engine.viewController.flutterView.frameBufferId;
+}
+
+static FlutterTransformation RootTransformation(FlutterEngine* engine) {
+  // Content needs to be flipped vertically
+  NSView* view = engine.viewController.view;
+  CGSize scaledSize = [view convertRectToBacking:view.bounds].size;
+  FlutterTransformation t;
+  t.scaleX = 1;
+  t.skewX = 0;
+  t.transX = 0;
+  t.skewY = 0;
+  t.scaleY = -1;
+  t.transY = scaledSize.height;
+  t.pers0 = 0;
+  t.pers1 = 0;
+  t.pers2 = 1;
+  return t;
 }
 
 static bool OnMakeResourceCurrent(FlutterEngine* engine) {
@@ -230,6 +246,7 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
       .open_gl.clear_current = (BoolCallback)OnClearCurrent,
       .open_gl.present = (BoolCallback)OnPresent,
       .open_gl.fbo_callback = (UIntCallback)OnFBO,
+      .open_gl.surface_transformation = (TransformationCallback)RootTransformation,
       .open_gl.make_resource_current = (BoolCallback)OnMakeResourceCurrent,
       .open_gl.gl_external_texture_frame_callback = (TextureFrameCallback)OnAcquireExternalTexture,
   };
@@ -280,7 +297,8 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
   }
 
   [self sendUserLocales];
-  [self updateWindowMetrics];
+
+  [self.viewController.flutterView start];
   return YES;
 }
 
@@ -291,7 +309,9 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
     [self shutDownEngine];
     _resourceContext = nil;
   }
-  [self updateWindowMetrics];
+  if (_engine) {
+    [self.viewController.flutterView start];
+  }
 }
 
 - (id<FlutterBinaryMessenger>)binaryMessenger {
@@ -317,6 +337,7 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
   return _resourceContext;
 }
 
+// Must be driven by FlutterView (i.e. [FlutterView start])
 - (void)updateWindowMetrics {
   if (!_engine) {
     return;
@@ -332,6 +353,18 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
       .pixel_ratio = pixelRatio,
   };
   FlutterEngineSendWindowMetricsEvent(_engine, &event);
+}
+
+- (void)scheduleOnRasterTread:(dispatch_block_t)block {
+  void* copy = Block_copy((__bridge void*)block);
+  FlutterEnginePostRenderThreadTask(
+      _engine,
+      [](void* cb) {
+        dispatch_block_t block = (__bridge dispatch_block_t)cb;
+        block();
+        Block_release(block);
+      },
+      copy);
 }
 
 - (void)sendPointerEvent:(const FlutterPointerEvent&)event {
@@ -380,7 +413,7 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
   if (!_mainOpenGLContext) {
     return false;
   }
-  [_mainOpenGLContext flushBuffer];
+  [self.viewController.flutterView present];
   return true;
 }
 
