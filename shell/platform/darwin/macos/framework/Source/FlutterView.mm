@@ -11,10 +11,6 @@
 #import <thread>
 #include "flutter/fml/memory/ref_counted.h"
 
-@interface CALayer (ContentsChanged)
-- (void)setContentsChanged;
-@end
-
 @protocol SynchronizerDelegate
 
 // Invoked on raster thread; Delegate should recreate IOSurface with given size
