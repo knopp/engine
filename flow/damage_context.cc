@@ -47,6 +47,7 @@ void DamageContext::PushLayerEntry(const Layer* layer,
   SkRect bounds = layer->paint_bounds();
   bounds.intersect(preroll_context.cull_rect);
   e.paint_bounds = matrix.mapRect(bounds);
+  e.paint_order = layer_entries_.size();
 
   for (auto i = preroll_context.mutators_stack.Begin();
        i != preroll_context.mutators_stack.End(); ++i) {
