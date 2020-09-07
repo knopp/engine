@@ -142,23 +142,6 @@ static uint32_t OnFBO(FlutterEngine* engine) {
   return engine.viewController.flutterView.frameBufferId;
 }
 
-static FlutterTransformation RootTransformation(FlutterEngine* engine) {
-  // Content needs to be flipped vertically
-  NSView* view = engine.viewController.view;
-  CGSize scaledSize = [view convertRectToBacking:view.bounds].size;
-  FlutterTransformation t;
-  t.scaleX = 1;
-  t.skewX = 0;
-  t.transX = 0;
-  t.skewY = 0;
-  t.scaleY = -1;
-  t.transY = scaledSize.height;
-  t.pers0 = 0;
-  t.pers1 = 0;
-  t.pers2 = 1;
-  return t;
-}
-
 static bool OnMakeResourceCurrent(FlutterEngine* engine) {
   return [engine engineCallbackOnMakeResourceCurrent];
 }
@@ -246,7 +229,6 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
       .open_gl.clear_current = (BoolCallback)OnClearCurrent,
       .open_gl.present = (BoolCallback)OnPresent,
       .open_gl.fbo_callback = (UIntCallback)OnFBO,
-      .open_gl.surface_transformation = (TransformationCallback)RootTransformation,
       .open_gl.make_resource_current = (BoolCallback)OnMakeResourceCurrent,
       .open_gl.gl_external_texture_frame_callback = (TextureFrameCallback)OnAcquireExternalTexture,
   };

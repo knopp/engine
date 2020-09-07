@@ -39,6 +39,7 @@ class ResizeSynchronizer;
   IOSurfaceRef _ioSurface;
   fml::RefPtr<ResizeSynchronizer> synchronizer;
   BOOL active;
+  CALayer* contentLayer;
 }
 
 @end
@@ -166,11 +167,14 @@ class ResizeSynchronizer : public fml::RefCountedThreadSafe<ResizeSynchronizer> 
                                                     shareContext:shareContext];
 
     [self setWantsLayer:YES];
-    self.layer.autoresizingMask = kCALayerNotSizable;
 
-    [self.openGLContext makeCurrentContext];
+    // covers entire view
+    contentLayer = [[CALayer alloc] init];
+    [self.layer addSublayer:contentLayer];
 
     synchronizer = fml::MakeRefCounted<ResizeSynchronizer>(self);
+
+    [self.openGLContext makeCurrentContext];
 
     glGenFramebuffers(1, &_frameBufferId);
     glBindFramebuffer(GL_FRAMEBUFFER, _frameBufferId);
@@ -243,8 +247,12 @@ class ResizeSynchronizer : public fml::RefCountedThreadSafe<ResizeSynchronizer> 
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
   self.layer.frame = self.bounds;
-  [self.layer setContents:nullptr];
-  [self.layer setContents:(__bridge id)_ioSurface];
+  self.layer.sublayerTransform = CATransform3DTranslate(CATransform3DMakeScale(1, -1, 1), 0,
+                                                        -self.layer.bounds.size.height, 0);
+  contentLayer.frame = self.layer.bounds;
+
+  [contentLayer setContents:nil];
+  [contentLayer setContents:(__bridge id)_ioSurface];
   [CATransaction commit];
 }
 
