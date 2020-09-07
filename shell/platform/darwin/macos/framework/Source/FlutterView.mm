@@ -11,6 +11,19 @@
 #import <thread>
 #include "flutter/fml/memory/ref_counted.h"
 
+namespace flutter {
+
+struct DamageRect {
+  int x;
+  int y;
+  int w;
+  int h;
+};
+
+extern DamageRect last_damage_rect;
+
+}  // namespace flutter
+
 @protocol SynchronizerDelegate
 
 // Invoked on raster thread; Delegate should recreate IOSurface with given size
@@ -36,6 +49,8 @@ class ResizeSynchronizer;
   fml::RefPtr<ResizeSynchronizer> synchronizer;
   BOOL active;
   CALayer* contentLayer;
+  CALayer* damageLayer;
+  CGRect prevDamageRect;
 }
 
 @end
@@ -168,6 +183,10 @@ class ResizeSynchronizer : public fml::RefCountedThreadSafe<ResizeSynchronizer> 
     contentLayer = [[CALayer alloc] init];
     [self.layer addSublayer:contentLayer];
 
+    // covers dirty region, repositioed on every update
+    damageLayer = [[CALayer alloc] init];
+    [self.layer addSublayer:damageLayer];
+
     synchronizer = fml::MakeRefCounted<ResizeSynchronizer>(self);
 
     [self.openGLContext makeCurrentContext];
@@ -247,7 +266,51 @@ class ResizeSynchronizer : public fml::RefCountedThreadSafe<ResizeSynchronizer> 
                                                         -self.layer.bounds.size.height, 0);
   contentLayer.frame = self.layer.bounds;
 
-  [contentLayer setContents:nil];
+  if (flutter::last_damage_rect.w < 0 || flutter::last_damage_rect.h < 0) {
+    [contentLayer setContents:nil];
+    [damageLayer setHidden:YES];
+  } else {
+    [damageLayer setContents:nil];
+    [damageLayer setContents:(__bridge id)_ioSurface];
+    [damageLayer setHidden:NO];
+
+    CGRect dirty = CGRectMake(flutter::last_damage_rect.x / 2.0, flutter::last_damage_rect.y / 2.0,
+                              flutter::last_damage_rect.w / 2.0, flutter::last_damage_rect.h / 2.0);
+
+    // NSLog(@"Damage rect: %f %f %f %f", dirty.origin.x, dirty.origin.y, dirty.size.width,
+    //       dirty.size.height);
+
+    if (dirty.size.width == 0 || dirty.size.height == 0) {
+      // for empty rect reuse previous one, otherwise the union below covers
+      // unnecessary big area
+      dirty = prevDamageRect;
+    }
+
+    // It is possible that current transaction will not actually make it until vsync
+    // to prevent artifacts, always when updating frame content, always update area from
+    // previous frame as well
+    CGRect frame = CGRectUnion(dirty, prevDamageRect);
+
+    double width = self.layer.bounds.size.width;
+    double height = self.layer.bounds.size.height;
+
+    frame.origin.y = height - frame.origin.y - frame.size.height;
+    damageLayer.frame = frame;
+    prevDamageRect = dirty;
+
+    damageLayer.contentsRect = CGRectMake(frame.origin.x / width, frame.origin.y / height,
+                                          frame.size.width / width, frame.size.height / height);
+
+#define DEBUG_DIRTY_RECT
+#ifdef DEBUG_DIRTY_RECT
+    if (@available(macOS 10.15, *)) {
+      damageLayer.borderColor = CGColorCreateSRGB(1, 1, 0, 1);
+      damageLayer.borderWidth = 2;
+    } else {
+      // Fallback on earlier versions
+    }
+#endif
+  }
   [contentLayer setContents:(__bridge id)_ioSurface];
   [CATransaction commit];
 }

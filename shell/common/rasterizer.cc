@@ -33,6 +33,15 @@
 
 namespace flutter {
 
+struct DamageRect {
+  int x;
+  int y;
+  int w;
+  int h;
+};
+
+DamageRect last_damage_rect = {0, 0, -1, -1};
+
 // The rasterizer will tell Skia to purge cached resources that have not been
 // used within this interval.
 static constexpr std::chrono::milliseconds kSkiaCleanupExpiration(15000);
@@ -467,8 +476,28 @@ RasterStatus Rasterizer::DrawToSurface(flutter::LayerTree& layer_tree) {
   );
 
   if (compositor_frame) {
+    static std::unique_ptr<DamageContext::FrameDescription> prev_description;
+    FrameDamage frame_damage;
+    frame_damage.previous_frame_description = prev_description.get();
+
     RasterStatus raster_status =
-        compositor_frame->Raster(layer_tree, false, nullptr);
+        compositor_frame->Raster(layer_tree, false, &frame_damage);
+    prev_description = std::move(frame_damage.frame_description);
+
+    if (raster_status == RasterStatus::kFailed) {
+      return raster_status;
+    }
+
+    SkIRect damage_rect = SkIRect::MakeSize(layer_tree.frame_size());
+    if (frame_damage.damage_area) {
+      damage_rect = frame_damage.damage_area->bounds();
+    }
+
+    last_damage_rect.x = damage_rect.x();
+    last_damage_rect.y = damage_rect.y();
+    last_damage_rect.w = damage_rect.width();
+    last_damage_rect.h = damage_rect.height();
+
     if (raster_status == RasterStatus::kFailed) {
       return raster_status;
     }
