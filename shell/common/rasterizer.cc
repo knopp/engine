@@ -33,6 +33,17 @@
 
 namespace flutter {
 
+struct DamageRect {
+  int x;
+  int y;
+  int w;
+  int h;
+};
+
+DamageRect last_damage_rect = {0, 0, -1, -1};
+
+int current_fbo;
+
 // The rasterizer will tell Skia to purge cached resources that have not been
 // used within this interval.
 static constexpr std::chrono::milliseconds kSkiaCleanupExpiration(15000);
@@ -152,7 +163,8 @@ void Rasterizer::DrawLastLayerTree() {
   DrawToSurface(*last_layer_tree_);
 }
 
-void Rasterizer::Draw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) {
+void Rasterizer::Draw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline,
+                      LayerTreeDiscardCallback discardCallback) {
   TRACE_EVENT0("flutter", "GPURasterizer::Draw");
   if (raster_thread_merger_ &&
       !raster_thread_merger_->IsOnRasterizingThread()) {
@@ -166,7 +178,11 @@ void Rasterizer::Draw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) {
   RasterStatus raster_status = RasterStatus::kFailed;
   Pipeline<flutter::LayerTree>::Consumer consumer =
       [&](std::unique_ptr<LayerTree> layer_tree) {
-        raster_status = DoDraw(std::move(layer_tree));
+        if (discardCallback(*layer_tree.get())) {
+          raster_status = RasterStatus::kDiscarded;
+        } else {
+          raster_status = DoDraw(std::move(layer_tree));
+        }
       };
 
   PipelineConsumeResult consume_result = pipeline->Consume(consumer);
@@ -459,10 +475,32 @@ RasterStatus Rasterizer::DrawToSurface(flutter::LayerTree& layer_tree) {
   );
 
   if (compositor_frame) {
+    static std::map<int, std::unique_ptr<DamageContext::FrameDescription>>
+        prev_description;
+    FrameDamage frame_damage;
+    frame_damage.previous_frame_description =
+        prev_description[current_fbo].get();
+
     RasterStatus raster_status =
-        compositor_frame->Raster(layer_tree, false, nullptr);
+        compositor_frame->Raster(layer_tree, false, &frame_damage);
+    prev_description[current_fbo] = std::move(frame_damage.frame_description);
+
     if (raster_status == RasterStatus::kFailed ||
         raster_status == RasterStatus::kSkipAndRetry) {
+      return raster_status;
+    }
+
+    SkIRect damage_rect = SkIRect::MakeSize(layer_tree.frame_size());
+    if (frame_damage.damage_area) {
+      damage_rect = frame_damage.damage_area->bounds();
+    }
+
+    last_damage_rect.x = damage_rect.x();
+    last_damage_rect.y = damage_rect.y();
+    last_damage_rect.w = damage_rect.width();
+    last_damage_rect.h = damage_rect.height();
+
+    if (raster_status == RasterStatus::kFailed) {
       return raster_status;
     }
     if (external_view_embedder != nullptr) {
