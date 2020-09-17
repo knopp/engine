@@ -141,6 +141,8 @@ class CompositorContext {
 
   Stopwatch& ui_time() { return ui_time_; }
 
+  DamageContext& damage_context() { return damage_context_; }
+
  private:
   RasterCache raster_cache_;
   TextureRegistry texture_registry_;

@@ -59,6 +59,7 @@ void DamageContext::InitFrame(const SkISize& tree_size,
                               const FrameDescription* previous_frame) {
   current_layer_tree_size_ = tree_size;
   previous_frame_ = previous_frame;
+  delegates_.clear();
 }
 
 DamageContext::LayerContributionHandle DamageContext::AddLayerContribution(
@@ -102,19 +103,81 @@ DamageContext::LayerContributionHandle DamageContext::AddLayerContribution(
                               preroll_context);
 }
 
-void DamageContext::AddReadbackArea(const SkMatrix& matrix,
-                                    const SkRect& area) {
-  SkIRect rect;
-  matrix.mapRect(area).roundOut(&rect);
-  readback_areas_.push_back(std::move(rect));
-}
-
 void DamageContext::LayerContributionHandle::UpdatePaintBounds() {
   if (context_ && index_ != static_cast<size_t>(-1)) {
     LayerContribution& c = context_->layer_entries_[index_];
     SkRect bounds = matrix_.mapRect(c.layer->paint_bounds());
     c.paint_bounds = bounds;
   }
+}
+
+const Layer* DamageContext::LayerContributionHandle::PreviousLayer() const {
+  if (context_ && index_ != static_cast<size_t>(-1) &&
+      context_->previous_frame_) {
+    auto res = context_->previous_frame_->entries.find(
+        context_->layer_entries_[index_]);
+    if (res != context_->previous_frame_->entries.end()) {
+      return res->layer.get();
+    }
+  }
+  return nullptr;
+}
+
+void DamageContext::LayerContributionHandle::AddDelegate(Delegate* delegate) {
+  if (context_ && index_ != static_cast<size_t>(-1)) {
+    DelegateRecord rec;
+    rec.delegate = delegate;
+    rec.paint_order = static_cast<int>(index_);
+    context_->delegates_.push_back(std::move(rec));
+  }
+}
+
+int DamageContext::LayerContributionHandle::PaintOrder() const {
+  return static_cast<int>(index_);
+}
+
+int DamageContext::LayerContributionHandle::PreviousPaintOrder() const {
+  if (context_ && index_ != static_cast<size_t>(-1) &&
+      context_->previous_frame_) {
+    auto res = context_->previous_frame_->entries.find(
+        context_->layer_entries_[index_]);
+    if (res != context_->previous_frame_->entries.end()) {
+      return res->paint_order;
+    }
+  }
+  return -1;
+}
+
+void DamageContext::AddDamageRect(DamageArea& area,
+                                  const SkRect& rect,
+                                  DamageSource source,
+                                  int paint_order) {
+  area.AddRect(rect);
+  for (auto& d : delegates_) {
+    d.delegate->OnDamageAdded(rect, source, paint_order);
+  }
+}
+
+void DamageContext::FinishDelegates(DamageArea& area) {
+  bool all_good;
+  do {
+    all_good = true;
+    for (auto& d : delegates_) {
+      auto prev = d.reported_damage;
+      d.reported_damage =
+          d.delegate->OnReportAdditionalDamage(SkRect::Make(area.bounds()));
+      if (d.reported_damage != prev) {
+        all_good = false;
+        for (auto d2 : delegates_) {
+          if (d.delegate != d2.delegate) {
+            d2.delegate->OnDamageAdded(d.reported_damage, kThisFrame,
+                                       d.paint_order);
+          }
+        }
+        area.AddRect(d.reported_damage);
+      }
+    }
+  } while (!all_good);
 }
 
 DamageContext::DamageResult DamageContext::FinishFrame() {
@@ -134,8 +197,10 @@ DamageContext::DamageResult DamageContext::FinishFrame() {
 
   if (!previous_frame_ ||
       previous_frame_->layer_tree_size != current_layer_tree_size_) {
-    res.area.AddRect(SkRect::MakeIWH(current_layer_tree_size_.width(),
-                                     current_layer_tree_size_.height()));
+    AddDamageRect(res.area,
+                  SkRect::MakeIWH(current_layer_tree_size_.width(),
+                                  current_layer_tree_size_.height()),
+                  kThisFrame, -1);
   } else {
     // layer entries that are only found in one set (only this frame or only
     // previous frame) are for layers that were either added, removed, or
@@ -150,7 +215,7 @@ DamageContext::DamageResult DamageContext::FinishFrame() {
     for (const auto& l : entries) {
       auto prev = previous_frame_->entries.find(l);
       if (prev == previous_frame_->entries.end()) {
-        res.area.AddRect(l.paint_bounds);
+        AddDamageRect(res.area, l.paint_bounds, kThisFrame, l.paint_order);
       } else {
         matching_current.push_back(&l);
         matching_previous.push_back(&*prev);
@@ -158,7 +223,7 @@ DamageContext::DamageResult DamageContext::FinishFrame() {
     }
     for (const auto& l : previous_frame_->entries) {
       if (entries.find(l) == entries.end()) {
-        res.area.AddRect(l.paint_bounds);
+        AddDamageRect(res.area, l.paint_bounds, kPreviousFrame, l.paint_order);
       }
     }
 
@@ -188,8 +253,10 @@ DamageContext::DamageResult DamageContext::FinishFrame() {
 
       while (*(*prev) != *(*cur)) {
         if ((*prev)->paint_bounds.intersects((*cur)->paint_bounds)) {
-          res.area.AddRect((*prev)->paint_bounds);
-          res.area.AddRect((*cur)->paint_bounds);
+          AddDamageRect(res.area, (*prev)->paint_bounds, kPreviousFrame,
+                        (*prev)->paint_order);
+          AddDamageRect(res.area, (*cur)->paint_bounds, kThisFrame,
+                        (*cur)->paint_order);
         }
         --cur;
       }
@@ -198,18 +265,12 @@ DamageContext::DamageResult DamageContext::FinishFrame() {
     }
   }
 
-  // If anything is damaged a in readback area, the whole readback area needs
-  // to be repainted
-  for (const auto& readback : readback_areas_) {
-    if (SkIRect::Intersects(res.area.bounds(), readback)) {
-      res.area.AddRect(readback);
-    }
-  }
+  FinishDelegates(res.area);
 
   previous_frame_ = nullptr;
   layer_entries_.clear();
-  readback_areas_.clear();
   current_layer_tree_size_ = SkISize::MakeEmpty();
+  delegates_.clear();
 
   return res;
 }

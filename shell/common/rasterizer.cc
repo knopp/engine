@@ -55,6 +55,8 @@ Rasterizer::Rasterizer(Delegate& delegate)
       user_override_resource_cache_bytes_(false),
       weak_factory_(this) {
   FML_DCHECK(compositor_context_);
+  compositor_context_->damage_context().set_raster_task_runner(
+      delegate.GetTaskRunners().GetRasterTaskRunner());
 }
 
 #if defined(LEGACY_FUCHSIA_EMBEDDER)
