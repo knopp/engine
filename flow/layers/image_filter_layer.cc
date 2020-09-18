@@ -19,6 +19,7 @@ void ImageFilterLayer::Preroll(PrerollContext* context,
   if (context->damage_context) {
     contribution = context->damage_context->AddLayerContribution(
         this, compare, matrix, *context);
+    contribution.AddDelegate(this);
   }
 
   Layer::AutoPrerollSaveLayerState save =
@@ -38,8 +39,8 @@ void ImageFilterLayer::Preroll(PrerollContext* context,
   if (context->damage_context) {
     // Push entry before children
     contribution.UpdatePaintBounds();
-    context->damage_context->AddReadbackArea(matrix, paint_bounds());
   }
+  screen_bounds_ = matrix.mapRect(paint_bounds());
 
   transformed_filter_ = nullptr;
   if (render_count_ >= kMinimumRendersBeforeCachingFilterLayer) {
@@ -102,6 +103,14 @@ void ImageFilterLayer::Paint(PaintContext& context) const {
   Layer::AutoSaveLayer save_layer = Layer::AutoSaveLayer::Create(
       context, GetChildContainer()->paint_bounds(), &paint);
   PaintChildren(context);
+}
+
+SkRect ImageFilterLayer::OnReportAdditionalDamage(const SkRect& bounds) {
+  if (bounds.intersects(screen_bounds_)) {
+    return screen_bounds_;
+  } else {
+    return SkRect::MakeEmpty();
+  }
 }
 
 bool ImageFilterLayer::compare(const Layer* l1, const Layer* l2) {

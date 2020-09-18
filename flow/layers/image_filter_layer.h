@@ -10,7 +10,8 @@
 
 namespace flutter {
 
-class ImageFilterLayer : public MergedContainerLayer {
+class ImageFilterLayer : public MergedContainerLayer,
+                         private DamageContext::Delegate {
  public:
   ImageFilterLayer(sk_sp<SkImageFilter> filter);
 
@@ -19,8 +20,6 @@ class ImageFilterLayer : public MergedContainerLayer {
   void Paint(PaintContext& context) const override;
 
  private:
-  static bool compare(const Layer* l1, const Layer* l2);
-
   // The ImageFilterLayer might cache the filtered output of this layer
   // if the layer remains stable (if it is not animating for instance).
   // If the ImageFilterLayer is not the same between rendered frames,
@@ -40,6 +39,14 @@ class ImageFilterLayer : public MergedContainerLayer {
   sk_sp<SkImageFilter> filter_;
   sk_sp<SkImageFilter> transformed_filter_;
   int render_count_;
+
+  //
+  SkRect screen_bounds_;
+
+  // DamageContext::Delegate
+  SkRect OnReportAdditionalDamage(const SkRect& bounds) override;
+
+  static bool compare(const Layer* l1, const Layer* l2);
 
   FML_DISALLOW_COPY_AND_ASSIGN(ImageFilterLayer);
 };
