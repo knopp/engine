@@ -40,8 +40,10 @@ void BackdropFilterLayer::Diff(DiffContext* context, const Layer* old_layer) {
 
 void BackdropFilterLayer::Preroll(PrerollContext* context,
                                   const SkMatrix& matrix) {
+  bool active = !context->cull_rect.isEmpty();
+
   Layer::AutoPrerollSaveLayerState save =
-      Layer::AutoPrerollSaveLayerState::Create(context, true, bool(filter_));
+      Layer::AutoPrerollSaveLayerState::Create(context, active, bool(filter_));
   ContainerLayer::Preroll(context, matrix);
 
   // Backdrop is restricted only by parent clip
