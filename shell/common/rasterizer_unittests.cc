@@ -119,8 +119,11 @@ TEST(RasterizerTest,
       std::make_shared<MockExternalViewEmbedder>();
   rasterizer->SetExternalViewEmbedder(external_view_embedder);
 
+  SurfaceFrame::FramebufferInfo framebuffer_info;
+  framebuffer_info.supports_readback = true;
+
   auto surface_frame = std::make_unique<SurfaceFrame>(
-      /*surface=*/nullptr, /*supports_readback=*/true,
+      /*surface=*/nullptr, framebuffer_info,
       /*submit_callback=*/[](const SurfaceFrame&, SkCanvas*) { return true; });
   EXPECT_CALL(*surface, AcquireFrame(SkISize()))
       .WillOnce(Return(ByMove(std::move(surface_frame))));
@@ -177,8 +180,10 @@ TEST(
   rasterizer->SetExternalViewEmbedder(external_view_embedder);
   EXPECT_CALL(*external_view_embedder, SupportsDynamicThreadMerging)
       .WillRepeatedly(Return(true));
+  SurfaceFrame::FramebufferInfo framebuffer_info;
+  framebuffer_info.supports_readback = true;
   auto surface_frame = std::make_unique<SurfaceFrame>(
-      /*surface=*/nullptr, /*supports_readback=*/true,
+      /*surface=*/nullptr, framebuffer_info,
       /*submit_callback=*/[](const SurfaceFrame&, SkCanvas*) { return true; });
   EXPECT_CALL(*surface, AcquireFrame(SkISize()))
       .WillOnce(Return(ByMove(std::move(surface_frame))));
@@ -235,8 +240,11 @@ TEST(
       std::make_shared<MockExternalViewEmbedder>();
   rasterizer->SetExternalViewEmbedder(external_view_embedder);
 
+  SurfaceFrame::FramebufferInfo framebuffer_info;
+  framebuffer_info.supports_readback = true;
+
   auto surface_frame = std::make_unique<SurfaceFrame>(
-      /*surface=*/nullptr, /*supports_readback=*/true,
+      /*surface=*/nullptr, framebuffer_info,
       /*submit_callback=*/[](const SurfaceFrame&, SkCanvas*) { return true; });
   EXPECT_CALL(*surface, AcquireFrame(SkISize()))
       .WillOnce(Return(ByMove(std::move(surface_frame))));
