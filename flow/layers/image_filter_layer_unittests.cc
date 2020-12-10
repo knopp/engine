@@ -354,7 +354,7 @@ TEST_F(ImageFilterLayerDiffTest, ImageFilterLayer) {
   EXPECT_EQ(damage.surface_damage, SkIRect::MakeLTRB(70, 70, 140, 140));
 
   LayerTree l2;
-  auto scale = std::make_shared<TransformLayer>(SkMatrix::MakeScale(2.0, 2.0));
+  auto scale = std::make_shared<TransformLayer>(SkMatrix::Scale(2.0, 2.0));
   scale->Add(filter_layer);
   l2.root()->Add(scale);
 
