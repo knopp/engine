@@ -43,6 +43,9 @@ void BackdropFilterLayer::Preroll(PrerollContext* context,
   Layer::AutoPrerollSaveLayerState save =
       Layer::AutoPrerollSaveLayerState::Create(context, true, bool(filter_));
   ContainerLayer::Preroll(context, matrix);
+
+  // Backdrop is restricted only by parent clip
+  set_paint_bounds(kGiantRect);
 }
 
 void BackdropFilterLayer::Paint(PaintContext& context) const {
