@@ -313,6 +313,8 @@ WindowWin32::HandleMessage(UINT const message,
     case WM_SYSDEADCHAR:
     case WM_CHAR:
     case WM_SYSCHAR: {
+      is_dead_key_ = message == WM_DEADCHAR || message == WM_SYSDEADCHAR;
+
       static wchar_t s_pending_high_surrogate = 0;
 
       wchar_t character = static_cast<wchar_t>(wparam);
@@ -356,8 +358,18 @@ WindowWin32::HandleMessage(UINT const message,
       // - Lead surrogates, which like dead keys will be send once combined.
       // - ASCII control characters, which are sent as WM_CHAR events for all
       //   control key shortcuts.
-      if (message == WM_CHAR && s_pending_high_surrogate == 0 &&
-          character >= u' ') {
+      // if (message == WM_CHAR && s_pending_high_surrogate == 0 &&
+      //     character >= u' ') {
+      //   OnText(text);
+      // }
+      break;
+    }
+    // Sent by keyboard_key_handler to pass on unhandled characters
+    case WM_USER: {
+      wchar_t character = static_cast<wchar_t>(wparam);
+
+      std::u16string text({character});
+      if (character >= u' ' && !is_dead_key_) {
         OnText(text);
       }
       break;

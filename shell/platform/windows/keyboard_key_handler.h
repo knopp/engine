@@ -13,6 +13,7 @@
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
 #include "flutter/shell/platform/windows/keyboard_handler_base.h"
 #include "flutter/shell/platform/windows/public/flutter_windows.h"
+#include "flutter/shell/platform/windows/window_binding_handler.h"
 #include "rapidjson/document.h"
 
 namespace flutter {
@@ -66,6 +67,8 @@ class KeyboardKeyHandler : public KeyboardHandlerBase {
 
   // Add a delegate that handles events received by |KeyboardHook|.
   void AddDelegate(std::unique_ptr<KeyboardKeyHandlerDelegate> delegate);
+
+  void SetPlatformWindow(PlatformWindow window) { platform_window_ = window; };
 
   // Handles a key event.
   //
@@ -180,6 +183,8 @@ class KeyboardKeyHandler : public KeyboardHandlerBase {
   // key codes, setting timestamps, etc.), it's not clear that the redispatched
   // events would have the same checksums.
   static uint64_t ComputeEventHash(const PendingEvent& event);
+
+  PlatformWindow platform_window_ = 0;
 };
 
 }  // namespace flutter

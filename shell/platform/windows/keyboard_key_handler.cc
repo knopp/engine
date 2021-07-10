@@ -151,7 +151,13 @@ void KeyboardKeyHandler::ResolvePendingEvent(uint64_t sequence_id,
         auto event_ptr = std::move(*iter);
         pending_responds_.erase(iter);
         if (!event_ptr->any_handled) {
-          RedispatchEvent(std::move(event_ptr));
+          if (event_ptr->character == 0) {
+            // do not redispatch character events; it breaks dead key state
+            RedispatchEvent(std::move(event_ptr));
+          } else {
+            // This is unhandled character event, pass it on
+            SendMessageW(platform_window_, WM_USER, event_ptr->character, 0);
+          }
         }
       }
       // Return here; |iter| can't do ++ after erase.

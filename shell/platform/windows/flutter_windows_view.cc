@@ -87,6 +87,7 @@ void FlutterWindowsView::RegisterKeyboardHandlers(
 #endif
   auto key_handler =
       std::make_unique<flutter::KeyboardKeyHandler>(redispatch_event);
+  key_handler->SetPlatformWindow(GetPlatformWindow());
   key_handler->AddDelegate(std::make_unique<KeyboardKeyEmbedderHandler>(
       [this](const FlutterKeyEvent& event, FlutterKeyEventCallback callback,
              void* user_data) {

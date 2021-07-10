@@ -196,6 +196,8 @@ class WindowWin32 {
 
   // Manages IME state.
   TextInputManagerWin32 text_input_manager_;
+
+  bool is_dead_key_ = false;
 };
 
 }  // namespace flutter
