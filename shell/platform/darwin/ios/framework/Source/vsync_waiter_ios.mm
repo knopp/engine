@@ -49,6 +49,7 @@ double VsyncWaiterIOS::GetRefreshRate() const {
   flutter::VsyncWaiter::Callback callback_;
   fml::scoped_nsobject<CADisplayLink> display_link_;
   double current_refresh_rate_;
+  BOOL awaiting_;
 }
 
 - (instancetype)initWithTaskRunner:(fml::RefPtr<fml::TaskRunner>)task_runner
@@ -95,9 +96,17 @@ double VsyncWaiterIOS::GetRefreshRate() const {
 
 - (void)await {
   display_link_.get().paused = NO;
+  awaiting_ = YES;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(pause) object:nil];
 }
 
 - (void)onDisplayLink:(CADisplayLink*)link {
+  if (!awaiting_) {
+    // We're not awaiting VSYNC, but the display link is still running for
+    // few frames to get high resulution touch events.
+    return;
+  }
+
   TRACE_EVENT0("flutter", "VSYNC");
 
   CFTimeInterval delay = CACurrentMediaTime() - link.timestamp;
@@ -113,12 +122,18 @@ double VsyncWaiterIOS::GetRefreshRate() const {
 
   recorder->RecordVsync(frame_start_time, frame_target_time);
   if (_allowPauseAfterVsync) {
-    display_link_.get().paused = YES;
+    awaiting_ = NO;
+    [self performSelector:@selector(pause) withObject:nil afterDelay:2.0 / 60.0];
   }
   callback_(std::move(recorder));
 }
 
+- (void)pause {
+  display_link_.get().paused = YES;
+}
+
 - (void)invalidate {
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(pause) object:nil];
   [display_link_.get() invalidate];
 }
 
