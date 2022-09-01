@@ -18,10 +18,11 @@ TEST(FlutterMetalCompositorTest, TestPresent) {
           mockViewController, /*platform_view_controller*/ nullptr, /*mtl_device*/ nullptr);
 
   bool flag = false;
-  macos_compositor->SetPresentCallback([f = &flag](bool has_flutter_content) {
-    *f = true;
-    return true;
-  });
+  macos_compositor->SetPresentCallback(
+      [f = &flag](bool has_flutter_content, std::function<void()> on_platform_thread) {
+        *f = true;
+        return true;
+      });
 
   ASSERT_TRUE(macos_compositor->Present(nil, 0));
   ASSERT_TRUE(flag);

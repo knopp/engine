@@ -92,7 +92,7 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
   if (!_openGLContext) {
     return false;
   }
-  [_flutterView present];
+  [_flutterView present:[]() {}];
   return true;
 }
 

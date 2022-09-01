@@ -105,7 +105,7 @@ bool FlutterGLCompositor::Present(const FlutterLayer** layers, size_t layers_cou
     };
   }
 
-  return EndFrame(has_flutter_content);
+  return EndFrame(has_flutter_content, [](){});
 }
 
 }  // namespace flutter

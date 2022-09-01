@@ -20,17 +20,11 @@ void FlutterCompositor::SetPresentCallback(
 
 void FlutterCompositor::StartFrame() {
   // First remove all CALayers from the superlayer.
-  for (auto layer : active_ca_layers_) {
-    [layer removeFromSuperlayer];
-  }
-
-  // Reset active layers.
-  active_ca_layers_.clear();
   SetFrameStatus(FrameStatus::kStarted);
 }
 
-bool FlutterCompositor::EndFrame(bool has_flutter_content) {
-  bool status = present_callback_(has_flutter_content);
+bool FlutterCompositor::EndFrame(bool has_flutter_content, std::function<void()> fn) {
+  bool status = present_callback_(has_flutter_content, fn);
   SetFrameStatus(FrameStatus::kEnded);
   return status;
 }

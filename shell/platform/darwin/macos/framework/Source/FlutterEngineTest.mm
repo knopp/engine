@@ -407,10 +407,11 @@ TEST(FlutterEngine, DISABLED_Compositor) {
   // Latch to ensure the entire layer tree has been generated and presented.
   fml::AutoResetWaitableEvent latch;
   auto compositor = engine.macOSCompositor;
-  compositor->SetPresentCallback([&](bool has_flutter_content) {
-    latch.Signal();
-    return true;
-  });
+  compositor->SetPresentCallback(
+      [&](bool has_flutter_content, std::function<void()> on_platform_thread) {
+        latch.Signal();
+        return true;
+      });
   latch.Wait();
 
   CALayer* rootLayer = viewController.flutterView.layer;

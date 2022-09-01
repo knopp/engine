@@ -68,8 +68,8 @@
   return [_resizableBackingStoreProvider backingStore];
 }
 
-- (void)present {
-  [_resizeSynchronizer requestCommit];
+- (void)present:(std::function<void()>)fn {
+  [_resizeSynchronizer requestCommit:fn];
 }
 
 - (void)reshaped {

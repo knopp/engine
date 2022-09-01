@@ -4,6 +4,8 @@
 
 #import "flutter/shell/platform/darwin/macos/framework/Source/FlutterResizeSynchronizer.h"
 
+#import <QuartzCore/QuartzCore.h>
+
 #include <mutex>
 
 @interface FlutterResizeSynchronizer () {
@@ -38,6 +40,8 @@
   BOOL _shuttingDown;
 
   __weak id<FlutterResizeSynchronizerDelegate> _delegate;
+
+  std::function<void()> _fn;
 }
 @end
 
@@ -84,6 +88,10 @@
 
   [_delegate resizeSynchronizerFlush:self];
   [_delegate resizeSynchronizerCommit:self];
+  if (_fn) {
+    _fn();
+    _fn = nullptr;
+  }
   _pendingCommit = NO;
   _condBlockBeginResize.notify_all();
 
@@ -105,7 +113,7 @@
   return _acceptingCommit;
 }
 
-- (void)requestCommit {
+- (void)requestCommit:(std::function<void()>)fn {
   std::unique_lock<std::mutex> lock(_mutex);
   if (!_acceptingCommit || _shuttingDown) {
     return;
@@ -115,18 +123,20 @@
 
   _pendingCommit = YES;
   if (_waiting) {  // BeginResize is in progress, interrupt it and schedule commit call
+    _fn = fn;
     _condBlockRequestCommit.notify_all();
     _condBlockBeginResize.wait(lock, [&]() { return !_pendingCommit || _shuttingDown; });
   } else {
     // No resize, schedule commit on platform thread and wait until either done
     // or interrupted by incoming BeginResize
     [_delegate resizeSynchronizerFlush:self];
-    dispatch_async(dispatch_get_main_queue(), [self, cookie = _cookie] {
+    dispatch_async(dispatch_get_main_queue(), [self, cookie = _cookie, fn = fn] {
       std::unique_lock<std::mutex> lock(_mutex);
       if (cookie == _cookie) {
         if (_delegate) {
           [_delegate resizeSynchronizerCommit:self];
         }
+        fn();
         _pendingCommit = NO;
         _condBlockBeginResize.notify_all();
       }

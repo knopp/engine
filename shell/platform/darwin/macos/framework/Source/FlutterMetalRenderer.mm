@@ -21,7 +21,7 @@ static FlutterMetalTexture OnGetNextDrawable(FlutterEngine* engine,
 
 static bool OnPresentDrawable(FlutterEngine* engine, const FlutterMetalTexture* texture) {
   FlutterMetalRenderer* metalRenderer = reinterpret_cast<FlutterMetalRenderer*>(engine.renderer);
-  return [metalRenderer present:texture->texture_id];
+  return [metalRenderer present:texture->texture_id pt:[]() {}];
 }
 
 static bool OnAcquireExternalTexture(FlutterEngine* engine,
@@ -99,11 +99,11 @@ static bool OnAcquireExternalTexture(FlutterEngine* engine,
   return embedderTexture;
 }
 
-- (BOOL)present:(int64_t)textureID {
+- (BOOL)present:(int64_t)textureID pt:(std::function<void()>)pt {
   if (!_flutterView) {
     return NO;
   }
-  [_flutterView present];
+  [_flutterView present:pt];
   return YES;
 }
 

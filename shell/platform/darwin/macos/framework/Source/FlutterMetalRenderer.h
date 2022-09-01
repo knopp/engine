@@ -5,6 +5,8 @@
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 
+#include <functional>
+
 #import "flutter/shell/platform/darwin/macos/framework/Source/FlutterRenderer.h"
 
 /**
@@ -32,7 +34,7 @@
 /**
  * Presents the texture specified by the texture id.
  */
-- (BOOL)present:(int64_t)textureID;
+- (BOOL)present:(int64_t)textureID pt:(std::function<void()>)pt;
 
 /**
  * Populates the texture registry with the provided metalTexture.

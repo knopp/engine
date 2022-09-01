@@ -4,6 +4,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <functional>
+
 #import "flutter/shell/platform/darwin/macos/framework/Source/FlutterResizableBackingStoreProvider.h"
 
 /**
@@ -48,7 +50,7 @@
 /**
  * Flushes the OpenGL context and flips the surfaces. Expected to be called on raster thread.
  */
-- (void)present;
+- (void)present:(std::function<void()>)fn;
 
 /**
  * Ensures that a backing store with requested size exists and returns the descriptor. Expected to

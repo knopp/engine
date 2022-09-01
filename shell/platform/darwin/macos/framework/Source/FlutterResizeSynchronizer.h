@@ -4,6 +4,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <functional>
+
 @class FlutterResizeSynchronizer;
 
 /**
@@ -73,7 +75,7 @@
  * Called from rasterizer thread, will block until delegate resizeSynchronizerCommit:
  * method is called (on platform thread).
  */
-- (void)requestCommit;
+- (void)requestCommit:(std::function<void()>)fn;
 
 /**
  * Called when shutting down. Unblocks everything and prevents any further synchronization.

@@ -41,9 +41,7 @@
 - (void)resizeSynchronizerCommit:(nonnull FlutterResizeSynchronizer*)synchronizer {
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
-
   [_surfaceManager swapBuffers];
-
   [CATransaction commit];
 }
 

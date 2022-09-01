@@ -438,30 +438,32 @@ static void OnPlatformMessage(const FlutterPlatformMessage* message, FlutterEngi
     FlutterMetalRenderer* metalRenderer = reinterpret_cast<FlutterMetalRenderer*>(_renderer);
     _macOSCompositor = std::make_unique<flutter::FlutterMetalCompositor>(
         _viewController, _platformViewController, metalRenderer.device);
-    _macOSCompositor->SetPresentCallback([weakSelf](bool has_flutter_content) {
-      if (has_flutter_content) {
-        FlutterMetalRenderer* metalRenderer =
-            reinterpret_cast<FlutterMetalRenderer*>(weakSelf.renderer);
-        return [metalRenderer present:0 /*=textureID*/] == YES;
-      } else {
-        return true;
-      }
-    });
+    _macOSCompositor->SetPresentCallback(
+        [weakSelf](bool has_flutter_content, std::function<void()> on_platform_thread) {
+          if (has_flutter_content) {
+            FlutterMetalRenderer* metalRenderer =
+                reinterpret_cast<FlutterMetalRenderer*>(weakSelf.renderer);
+            return [metalRenderer present:0 /*=textureID*/ pt:on_platform_thread] == YES;
+          } else {
+            return true;
+          }
+        });
   } else {
     FlutterOpenGLRenderer* openGLRenderer = reinterpret_cast<FlutterOpenGLRenderer*>(_renderer);
     [openGLRenderer.openGLContext makeCurrentContext];
     _macOSCompositor = std::make_unique<flutter::FlutterGLCompositor>(_viewController,
                                                                       openGLRenderer.openGLContext);
 
-    _macOSCompositor->SetPresentCallback([weakSelf](bool has_flutter_content) {
-      if (has_flutter_content) {
-        FlutterOpenGLRenderer* openGLRenderer =
-            reinterpret_cast<FlutterOpenGLRenderer*>(weakSelf.renderer);
-        return [openGLRenderer glPresent] == YES;
-      } else {
-        return true;
-      }
-    });
+    _macOSCompositor->SetPresentCallback(
+        [weakSelf](bool has_flutter_content, std::function<void()> on_platform_thread) {
+          if (has_flutter_content) {
+            FlutterOpenGLRenderer* openGLRenderer =
+                reinterpret_cast<FlutterOpenGLRenderer*>(weakSelf.renderer);
+            return [openGLRenderer glPresent] == YES;
+          } else {
+            return true;
+          }
+        });
   }
 
   _compositor = {};

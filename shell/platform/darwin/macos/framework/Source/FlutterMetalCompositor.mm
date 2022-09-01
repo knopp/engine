@@ -81,6 +81,18 @@ bool FlutterMetalCompositor::Present(const FlutterLayer** layers, size_t layers_
   SetFrameStatus(FrameStatus::kPresenting);
 
   bool has_flutter_content = false;
+
+  std::vector<std::function<void()>> fns;
+  fns.push_back([this] {
+    for (auto layer : active_ca_layers_) {
+      // NSLog(@"Remove layer");
+      [layer removeFromSuperlayer];
+    }
+
+    // Reset active layers.
+    active_ca_layers_.clear();
+  });
+
   for (size_t i = 0; i < layers_count; ++i) {
     const auto* layer = layers[i];
     FlutterBackingStore* backing_store = const_cast<FlutterBackingStore*>(layer->backing_store);
@@ -91,25 +103,31 @@ bool FlutterMetalCompositor::Present(const FlutterLayer** layers, size_t layers_
           FlutterIOSurfaceHolder* io_surface_holder =
               (__bridge FlutterIOSurfaceHolder*)backing_store->metal.texture.user_data;
           IOSurfaceRef io_surface = [io_surface_holder ioSurface];
-          InsertCALayerForIOSurface(io_surface);
+          // NSLog(@"Insert CALAyer");
+          fns.push_back([this, io_surface] { InsertCALayerForIOSurface(io_surface); });
         }
         has_flutter_content = true;
         break;
       }
       case kFlutterLayerContentTypePlatformView:
-        PresentPlatformView(layer, i);
+        fns.push_back([this, layer, i] { PresentPlatformView(layer, i); });
+
         break;
     };
   }
 
-  return EndFrame(has_flutter_content);
+  return EndFrame(has_flutter_content, [fns]() {
+    for (auto fn : fns) {
+      fn();
+    }
+  });
 }
 
 void FlutterMetalCompositor::PresentPlatformView(const FlutterLayer* layer, size_t layer_position) {
   // TODO (https://github.com/flutter/flutter/issues/96668)
   // once the issue is fixed, this check will pass.
-  FML_DCHECK([[NSThread currentThread] isMainThread])
-      << "Must be on the main thread to present platform views";
+  // FML_DCHECK([[NSThread currentThread] isMainThread])
+  //     << "Must be on the main thread to present platform views";
 
   int64_t platform_view_id = layer->platform_view->identifier;
   NSView* platform_view = [platform_views_controller_ platformViewWithID:platform_view_id];

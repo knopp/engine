@@ -32,7 +32,7 @@ TEST(FlutterMetalRenderer, PresentDelegatesToFlutterView) {
   id mockFlutterView = OCMClassMock([FlutterView class]);
   [[mockFlutterView expect] present];
   [renderer setFlutterView:mockFlutterView];
-  [renderer present:1];
+  [renderer present:1 pt:[](){}];
 }
 
 TEST(FlutterMetalRenderer, TextureReturnedByFlutterView) {
