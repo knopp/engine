@@ -93,9 +93,9 @@ struct MouseState {
   bool rotate_gesture_active = false;
 
   /**
-   * System scroll inertia is currently sending us events.
+   * Time of last scroll momentum event.
    */
-  bool system_scroll_inertia_active = false;
+  CFAbsoluteTime last_scroll_momentum_changed_time = 0;
 
   /**
    * Resets all gesture state to default values.
@@ -524,15 +524,7 @@ static void CommonInit(FlutterViewController* controller) {
       // Set this on NSEventPhaseChanged instead of NSEventPhaseBegan.
       // On macOS ventura in low power mode there is ocasional  touchesEvent:
       // delivered during momentum phase between began and changed.
-      _mouseState.system_scroll_inertia_active = true;
-    } else if (event.momentumPhase == NSEventPhaseEnded ||
-               event.momentumPhase == NSEventPhaseCancelled) {
-      // On macOS ventura first the gesture event is delivered and only then
-      // touchesBeganWithEvent:. It seems to happen in same run loop turn so
-      // just delaying this after the run loop turn seem to be enough.
-      dispatch_async(dispatch_get_main_queue(), ^{
-        _mouseState.system_scroll_inertia_active = false;
-      });
+      _mouseState.last_scroll_momentum_changed_time = CFAbsoluteTimeGetCurrent();
     }
     // Skip momentum update events, the framework will generate scroll momentum.
     NSAssert(event.momentumPhase != NSEventPhaseNone,
@@ -556,6 +548,7 @@ static void CommonInit(FlutterViewController* controller) {
                               _mouseState.rotate_gesture_active;
     if (event.type == NSEventTypeScrollWheel) {
       _mouseState.pan_gesture_active = true;
+      _mouseState.last_scroll_momentum_changed_time = 0;
     } else if (event.type == NSEventTypeMagnify) {
       _mouseState.scale_gesture_active = true;
     } else if (event.type == NSEventTypeRotate) {
@@ -848,7 +841,7 @@ static void CommonInit(FlutterViewController* controller) {
 - (void)touchesBeganWithEvent:(NSEvent*)event {
   NSTouch* touch = event.allTouches.anyObject;
   if (touch != nil) {
-    if (_mouseState.system_scroll_inertia_active) {
+    if (CFAbsoluteTimeGetCurrent() - _mouseState.last_scroll_momentum_changed_time < 0.01) {
       // The trackpad has been touched and a scroll gesture is still sending inertia events.
       // A scroll inertia cancel message should be sent to the framework.
       NSPoint locationInView = [self.flutterView convertPoint:event.locationInWindow fromView:nil];
