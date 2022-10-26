@@ -520,11 +520,19 @@ static void CommonInit(FlutterViewController* controller) {
   } else if (event.phase == NSEventPhaseNone && event.momentumPhase == NSEventPhaseNone) {
     [self dispatchMouseEvent:event phase:kHover];
   } else {
-    if (event.momentumPhase == NSEventPhaseBegan) {
+    if (event.momentumPhase == NSEventPhaseChanged) {
+      // Set this on NSEventPhaseChanged instead of NSEventPhaseBegan.
+      // On macOS ventura in low power mode there is ocasional  touchesEvent:
+      // delivered during momentum phase between began and changed.
       _mouseState.system_scroll_inertia_active = true;
     } else if (event.momentumPhase == NSEventPhaseEnded ||
                event.momentumPhase == NSEventPhaseCancelled) {
-      _mouseState.system_scroll_inertia_active = false;
+      // On macOS ventura first the gesture event is delivered and only then
+      // touchesBeganWithEvent:. It seems to happen in same run loop turn so
+      // just delaying this after the run loop turn seem to be enough.
+      dispatch_async(dispatch_get_main_queue(), ^{
+        _mouseState.system_scroll_inertia_active = false;
+      });
     }
     // Skip momentum update events, the framework will generate scroll momentum.
     NSAssert(event.momentumPhase != NSEventPhaseNone,
