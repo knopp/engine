@@ -29,6 +29,8 @@
 
   // Currently visible layers.
   NSMutableArray<CALayer*>* _layers;
+
+  CATextLayer* _infoLayer;
 }
 
 /**
@@ -151,6 +153,17 @@ static void UpdateContentSubLayers(CALayer* layer,
     // NSLog(@"Surface rects %li", info.coverage.size());
     layer.zPosition = info.zIndex;
   }
+
+  if (_infoLayer == nil) {
+    _infoLayer = [[CATextLayer alloc] init];
+    [_containingLayer addSublayer:_infoLayer];
+    _infoLayer.fontSize = 15;
+    _infoLayer.foregroundColor = [NSColor yellowColor].CGColor;
+    _infoLayer.frame = CGRectMake(15, 15, 300, 100);
+    _infoLayer.contentsScale = _containingLayer.contentsScale;
+    _infoLayer.zPosition = 100000;
+  }
+  _infoLayer.string = [NSString stringWithFormat:@"Surface count: %li", _layers.count];
 }
 
 static CGSize GetRequiredFrameSize(NSArray<FlutterSurfacePresentInfo*>* surfaces) {
