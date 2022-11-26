@@ -24,7 +24,8 @@ class EmbedderLayers {
 
   ~EmbedderLayers();
 
-  void PushBackingStoreLayer(const FlutterBackingStore* store);
+  void PushBackingStoreLayer(const FlutterBackingStore* store,
+                             const std::list<SkRect>& coverage);
 
   void PushPlatformViewLayer(FlutterPlatformViewIdentifier identifier,
                              const EmbeddedViewParams& params);
@@ -42,6 +43,7 @@ class EmbedderLayers {
       mutations_referenced_;
   std::vector<std::unique_ptr<std::vector<const FlutterPlatformViewMutation*>>>
       mutations_arrays_referenced_;
+  std::vector<std::unique_ptr<std::vector<FlutterRect>>> rects_referenced_;
   std::vector<FlutterLayer> presented_layers_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(EmbedderLayers);

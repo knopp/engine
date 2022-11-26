@@ -1587,6 +1587,13 @@ typedef struct {
   FlutterPoint offset;
   /// The size of the layer (in physical pixels).
   FlutterSize size;
+
+  /// For backing store, array of rectangles represeting actual drawn areas.
+  FlutterRect* covered_area;
+
+  /// Number of rectangles in covered_area.
+  size_t covered_area_count;
+
 } FlutterLayer;
 
 typedef bool (*FlutterBackingStoreCreateCallback)(

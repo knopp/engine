@@ -17,7 +17,8 @@ EmbedderLayers::EmbedderLayers(SkISize frame_size,
 
 EmbedderLayers::~EmbedderLayers() = default;
 
-void EmbedderLayers::PushBackingStoreLayer(const FlutterBackingStore* store) {
+void EmbedderLayers::PushBackingStoreLayer(const FlutterBackingStore* store,
+                                           const std::list<SkRect>& coverage) {
   FlutterLayer layer = {};
 
   layer.struct_size = sizeof(FlutterLayer);
@@ -34,6 +35,19 @@ void EmbedderLayers::PushBackingStoreLayer(const FlutterBackingStore* store) {
   layer.offset.y = transformed_layer_bounds.y();
   layer.size.width = transformed_layer_bounds.width();
   layer.size.height = transformed_layer_bounds.height();
+
+  auto rects = std::make_unique<std::vector<FlutterRect>>();
+  rects->reserve(coverage.size());
+
+  for (const auto& rect : coverage) {
+    auto transformed_rect = root_surface_transformation_.mapRect(rect);
+    rects->push_back({transformed_rect.x(), transformed_rect.y(),
+                      transformed_rect.right(), transformed_rect.bottom()});
+  }
+
+  layer.covered_area = rects->data();
+  layer.covered_area_count = rects->size();
+  rects_referenced_.push_back(std::move(rects));
 
   presented_layers_.push_back(layer);
 }
@@ -195,6 +209,8 @@ void EmbedderLayers::PushPlatformViewLayer(
   layer.offset.y = transformed_layer_bounds.y();
   layer.size.width = transformed_layer_bounds.width();
   layer.size.height = transformed_layer_bounds.height();
+  layer.covered_area = nullptr;
+  layer.covered_area_count = 0;
 
   presented_layers_.push_back(layer);
 }

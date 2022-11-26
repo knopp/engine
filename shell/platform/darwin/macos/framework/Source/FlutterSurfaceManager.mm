@@ -38,6 +38,40 @@
 
 @end
 
+static void UpdateContentSubLayers(CALayer* layer,
+                                   IOSurfaceRef surface,
+                                   CGFloat scale,
+                                   CGSize surfaceSize,
+                                   const std::vector<FlutterRect>& coverage) {
+  while (layer.sublayers.count > coverage.size()) {
+    [layer.sublayers.lastObject removeFromSuperlayer];
+  }
+
+  while (layer.sublayers.count < coverage.size()) {
+    CALayer* newLayer = [CALayer layer];
+    [layer addSublayer:newLayer];
+  }
+
+  for (size_t i = 0; i < coverage.size(); i++) {
+    CALayer* subLayer = [layer.sublayers objectAtIndex:i];
+    const auto& rect = coverage[i];
+    subLayer.frame = CGRectMake(rect.left / scale, rect.top / scale,
+                                (rect.right - rect.left) / scale, (rect.bottom - rect.top) / scale);
+
+    double w = surfaceSize.width;
+    double h = surfaceSize.height;
+
+    subLayer.contentsRect = CGRectMake(rect.left / w, rect.top / h, (rect.right - rect.left) / w,
+                                       (rect.bottom - rect.top) / h);
+
+    // Visualize sublayer
+    subLayer.borderColor = [NSColor yellowColor].CGColor;
+    subLayer.borderWidth = 1.0;
+
+    subLayer.contents = (__bridge id)surface;
+  }
+}
+
 @implementation FlutterSurfaceManager
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device
@@ -105,9 +139,16 @@
     FlutterSurfacePresentInfo* info = surfaces[i];
     CALayer* layer = _layers[i];
     CGFloat scale = _containingLayer.contentsScale;
-    layer.frame = CGRectMake(info.offset.x / scale, info.offset.y / scale,
-                             info.surface.size.width / scale, info.surface.size.height / scale);
-    layer.contents = (__bridge id)info.surface.ioSurface;
+    if (i == 0) {
+      layer.frame = CGRectMake(info.offset.x / scale, info.offset.y / scale,
+                               info.surface.size.width / scale, info.surface.size.height / scale);
+      layer.contents = (__bridge id)info.surface.ioSurface;
+    } else {
+      layer.frame = CGRectZero;
+      UpdateContentSubLayers(layer, info.surface.ioSurface, scale, info.surface.size,
+                             info.coverage);
+    }
+    // NSLog(@"Surface rects %li", info.coverage.size());
     layer.zPosition = info.zIndex;
   }
 }

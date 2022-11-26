@@ -57,6 +57,10 @@ bool FlutterCompositor::Present(FlutterViewId view_id,
         info.surface = surface;
         info.offset = CGPointMake(layer->offset.x, layer->offset.y);
         info.zIndex = i;
+        if (layer->covered_area != nullptr) {
+          info.coverage = std::vector<FlutterRect>(layer->covered_area,
+                                                   layer->covered_area + layer->covered_area_count);
+        }
         [surfaces addObject:info];
       }
     }
