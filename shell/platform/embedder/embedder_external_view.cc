@@ -87,7 +87,8 @@ const EmbeddedViewParams* EmbedderExternalView::GetEmbeddedViewParams() const {
   return embedded_view_params_.get();
 }
 
-bool EmbedderExternalView::Render(const EmbedderRenderTarget& render_target) {
+bool EmbedderExternalView::Render(const EmbedderRenderTarget& render_target,
+                                  bool clear_surface) {
   TRACE_EVENT0("flutter", "EmbedderExternalView::Render");
   TryEndRecording();
   FML_DCHECK(HasEngineRenderedContents())
@@ -124,7 +125,9 @@ bool EmbedderExternalView::Render(const EmbedderRenderTarget& render_target) {
   DlSkCanvasAdapter dl_canvas(canvas);
   int restore_count = dl_canvas.GetSaveCount();
   dl_canvas.SetTransform(surface_transformation_);
-  dl_canvas.Clear(DlColor::kTransparent());
+  if (clear_surface) {
+    dl_canvas.Clear(DlColor::kTransparent());
+  }
   slice_->render_into(&dl_canvas);
   dl_canvas.RestoreToCount(restore_count);
   dl_canvas.Flush();

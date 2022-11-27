@@ -9,6 +9,7 @@
 
 #include "flutter/shell/platform/embedder/embedder_layers.h"
 #include "flutter/shell/platform/embedder/embedder_render_target.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
 
 namespace flutter {
@@ -121,6 +122,298 @@ static FlutterBackingStoreConfig MakeBackingStoreConfig(
 
   return config;
 }
+
+// https://flutter.dev/go/optimized-platform-view-layers
+#define ENABLE_OPTIMIZED_LAYERS 0
+
+#if ENABLE_OPTIMIZED_LAYERS == 1
+
+namespace {
+
+struct PlatformView {
+  EmbedderExternalView::ViewIdentifier view_identifier;
+  const EmbeddedViewParams* params;
+  SkRect clipped_frame;
+
+  explicit PlatformView(const EmbedderExternalView* view) {
+    assert(view->HasPlatformView());
+    view_identifier = view->GetViewIdentifier();
+    params = view->GetEmbeddedViewParams();
+
+    clipped_frame = view->GetEmbeddedViewParams()->finalBoundingRect();
+    SkMatrix transform;
+    for (auto i = params->mutatorsStack().Begin();
+         i != params->mutatorsStack().End(); ++i) {
+      const auto& m = *i;
+      if (m->GetType() == MutatorType::kTransform) {
+        transform.preConcat(m->GetMatrix());
+      } else if (m->GetType() == MutatorType::kClipRect) {
+        auto rect = transform.mapRect(m->GetRect());
+        if (!clipped_frame.intersect(rect)) {
+          clipped_frame = SkRect::MakeEmpty();
+        }
+      } else if (m->GetType() == MutatorType::kClipRRect) {
+        auto rect = transform.mapRect(m->GetRRect().getBounds());
+        if (!clipped_frame.intersect(rect)) {
+          clipped_frame = SkRect::MakeEmpty();
+        }
+      } else if (m->GetType() == MutatorType::kClipPath) {
+        auto rect = transform.mapRect(m->GetPath().getBounds());
+        if (!clipped_frame.intersect(rect)) {
+          clipped_frame = SkRect::MakeEmpty();
+        }
+      }
+    }
+  }
+};
+
+class Layer {
+ public:
+  bool IntersectsPlatformView(const SkRect& rect) {
+    for (auto& platform_view : platform_views_) {
+      if (platform_view.clipped_frame.intersects(rect)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool IntersectsPlatformView(const SkRegion& region) {
+    for (auto& platform_view : platform_views_) {
+      if (region.intersects(platform_view.clipped_frame.roundOut())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool IntersectsFlutterContents(const SkRect& rect) {
+    return flutter_contents_region_.intersects(rect.roundOut());
+  }
+
+  bool IntersectsFlutterContents(const SkRegion& region) {
+    return flutter_contents_region_.intersects(region);
+  }
+
+  void AddPlatformView(const PlatformView& platform_view) {
+    platform_views_.push_back(platform_view);
+  }
+
+  void AddFlutterContents(EmbedderExternalView* contents,
+                          const SkRegion& contents_region) {
+    flutter_contents_.push_back(contents);
+    flutter_contents_region_.op(contents_region, SkRegion::kUnion_Op);
+  }
+
+  bool has_flutter_contents() const { return !flutter_contents_.empty(); }
+
+  void SetRenderTarget(std::unique_ptr<EmbedderRenderTarget> target) {
+    assert(render_target_ == nullptr);
+    assert(has_flutter_contents());
+    render_target_ = std::move(target);
+  }
+
+  void RenderFlutterContents() {
+    assert(has_flutter_contents());
+    assert(render_target_ != nullptr);
+
+    bool clear_surface = true;
+    for (auto c : flutter_contents_) {
+      c->Render(*render_target_, clear_surface);
+      clear_surface = false;
+    }
+  }
+
+  const std::vector<PlatformView>& platform_views() const {
+    return platform_views_;
+  }
+
+  const EmbedderRenderTarget* render_target() const {
+    return render_target_.get();
+  }
+
+  std::list<SkRect> coverage() {
+    std::list<SkRect> res;
+
+    SkRegion::Iterator iterator(flutter_contents_region_);
+
+    // Vertically deband cliperator rectangles.
+    while (!iterator.done()) {
+      auto rect = SkRect::Make(iterator.rect());
+      auto iter = res.end();
+      // If there is recangle previously in rect on which this one is a vertical
+      // continuation, remove the previous rectangle and expand this one
+      // vertically to cover the area.
+      while (iter != res.begin()) {
+        --iter;
+        if (iter->bottom() < rect.top()) {
+          // Went too far.
+          break;
+        } else if (iter->bottom() == rect.top() &&
+                   iter->left() == rect.left() &&
+                   iter->right() == rect.right()) {
+          rect.fTop = iter->fTop;
+          res.erase(iter);
+          break;
+        }
+      }
+      res.push_back(rect);
+      iterator.next();
+    }
+
+    return res;
+  }
+
+ private:
+  std::vector<PlatformView> platform_views_;
+  std::vector<EmbedderExternalView*> flutter_contents_;
+  SkRegion flutter_contents_region_;
+  std::unique_ptr<EmbedderRenderTarget> render_target_;
+};
+
+class LayerBuilder {
+ public:
+  explicit LayerBuilder(SkISize frame_size) : frame_size_(frame_size) {
+    layers_.push_back(Layer());
+  }
+
+  void AddExternalView(EmbedderExternalView* view) {
+    if (view->HasPlatformView()) {
+      PlatformView platform_view(view);
+      AddPlatformView(platform_view);
+    }
+    if (view->HasEngineRenderedContents()) {
+      AddFlutterContents(view);
+    }
+  }
+
+  void PrepareBackingStore(
+      const std::function<std::unique_ptr<EmbedderRenderTarget>(
+          FlutterBackingStoreConfig)>& target_provider) {
+    auto config = MakeBackingStoreConfig(frame_size_);
+    for (auto& layer : layers_) {
+      if (layer.has_flutter_contents()) {
+        layer.SetRenderTarget(target_provider(config));
+      }
+    }
+  }
+
+  void Render() {
+    for (auto& layer : layers_) {
+      if (layer.has_flutter_contents()) {
+        layer.RenderFlutterContents();
+      }
+    }
+  }
+
+  void PushLayers(EmbedderLayers& layers) {
+    for (auto& layer : layers_) {
+      for (auto& view : layer.platform_views()) {
+        layers.PushPlatformViewLayer(
+            view.view_identifier.platform_view_id.value(), *view.params);
+      }
+      if (layer.render_target() != nullptr) {
+        layers.PushBackingStoreLayer(layer.render_target()->GetBackingStore(),
+                                     layer.coverage());
+      }
+    }
+  }
+
+ private:
+  void AddPlatformView(PlatformView view) {
+    GetLayerForPlatformView(view).AddPlatformView(view);
+  }
+
+  void AddFlutterContents(EmbedderExternalView* contents) {
+    assert(contents->HasEngineRenderedContents());
+
+    SkRegion region;
+    auto rects = contents->SearchNonOverlappingDrawnRects(
+        SkRect::MakeIWH(frame_size_.width(), frame_size_.height()));
+    for (const auto& r : rects) {
+      region.op(r.roundOut(), SkRegion::kUnion_Op);
+    }
+
+    GetLayerForFlutterContentsRegion(region).AddFlutterContents(contents,
+                                                                region);
+  }
+
+  Layer& GetLayerForPlatformView(PlatformView view) {
+    for (auto iter = layers_.rbegin(); iter != layers_.rend(); ++iter) {
+      if (iter->IntersectsFlutterContents(view.clipped_frame)) {
+        if (iter == layers_.rbegin()) {
+          layers_.emplace_back();
+          return layers_.back();
+        } else {
+          --iter;
+          return *iter;
+        }
+      }
+      if (iter->IntersectsPlatformView(view.clipped_frame)) {
+        return *iter;
+      }
+    }
+    return layers_.front();
+  }
+
+  Layer& GetLayerForFlutterContentsRegion(const SkRegion& region) {
+    for (auto iter = layers_.rbegin(); iter != layers_.rend(); ++iter) {
+      if (iter->IntersectsPlatformView(region) ||
+          iter->IntersectsFlutterContents(region)) {
+        return *iter;
+      }
+    }
+    return layers_.front();
+  }
+
+  std::vector<Layer> layers_;
+  SkISize frame_size_;
+};
+
+};  // namespace
+
+void EmbedderExternalViewEmbedder::SubmitFrame(
+    GrDirectContext* context,
+    std::unique_ptr<SurfaceFrame> frame) {
+  SkRect _rect = SkRect::MakeIWH(pending_frame_size_.width(),
+                                 pending_frame_size_.height());
+  pending_surface_transformation_.mapRect(&_rect);
+
+  LayerBuilder builder(SkISize::Make(_rect.width(), _rect.height()));
+
+  for (auto view_id : composition_order_) {
+    auto& view = pending_views_[view_id];
+    builder.AddExternalView(view.get());
+  }
+
+  builder.PrepareBackingStore([&](FlutterBackingStoreConfig config) {
+    return create_render_target_callback_(context, config);
+  });
+
+  if (context) {
+    context->resetContext(kAll_GrBackendState);
+  }
+
+  builder.Render();
+
+  if (context) {
+    context->flushAndSubmit();
+  }
+
+  EmbedderLayers presented_layers(pending_frame_size_,
+                                  pending_device_pixel_ratio_,
+                                  pending_surface_transformation_);
+
+  builder.PushLayers(presented_layers);
+
+  presented_layers.InvokePresentCallback(present_callback_);
+
+  (void)avoid_backing_store_cache_;
+
+  frame->Submit();
+}
+
+#else
 
 // |ExternalViewEmbedder|
 void EmbedderExternalViewEmbedder::SubmitFrame(
@@ -270,5 +563,7 @@ void EmbedderExternalViewEmbedder::SubmitFrame(
 
   frame->Submit();
 }
+
+#endif
 
 }  // namespace flutter

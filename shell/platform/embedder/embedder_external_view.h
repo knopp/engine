@@ -107,7 +107,8 @@ class EmbedderExternalView {
 
   SkISize GetRenderSurfaceSize() const;
 
-  bool Render(const EmbedderRenderTarget& render_target);
+  bool Render(const EmbedderRenderTarget& render_target,
+              bool clear_surface = true);
 
   std::list<SkRect> SearchNonOverlappingDrawnRects(const SkRect& query) const;
 
