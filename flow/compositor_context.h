@@ -91,12 +91,10 @@ class FrameDamage {
 
   // See Damage::buffer_damage.
   std::optional<SkIRect> GetBufferDamage() {
-    return (damage_ && !ignore_damage_)
-               ? std::make_optional(damage_->buffer_damage)
-               : std::nullopt;
+    return damage_ ? std::make_optional(damage_->buffer_damage) : std::nullopt;
   }
 
-  void Reset() { ignore_damage_ = true; }
+  void Reset() { damage_ = std::nullopt; }
 
  private:
   SkIRect additional_damage_ = SkIRect::MakeEmpty();
@@ -104,7 +102,6 @@ class FrameDamage {
   const LayerTree* prev_layer_tree_ = nullptr;
   int vertical_clip_alignment_ = 1;
   int horizontal_clip_alignment_ = 1;
-  bool ignore_damage_ = false;
 };
 
 class CompositorContext {

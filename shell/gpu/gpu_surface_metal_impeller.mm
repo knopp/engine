@@ -77,6 +77,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const SkISiz
       fml::MakeCopyable([this,                           //
                          renderer = impeller_renderer_,  //
                          aiks_context = aiks_context_,   //
+                         frame_info = frame_info,        //
                          metal_drawable                  //
   ](SurfaceFrame& surface_frame, DlCanvas* canvas) mutable -> bool {
         if (!aiks_context) {
@@ -97,6 +98,9 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalImpeller::AcquireFrame(const SkISiz
               // Accumulate damage for other framebuffers
               if (surface_frame.submit_info().frame_damage) {
                 entry.second.join(*surface_frame.submit_info().frame_damage);
+              } else {
+                // Not getting frame damage assume whole frame is repainted.
+                entry.second.join(SkIRect::MakeSize(frame_info));
               }
             }
           }
