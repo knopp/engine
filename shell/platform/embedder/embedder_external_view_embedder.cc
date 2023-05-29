@@ -123,11 +123,6 @@ static FlutterBackingStoreConfig MakeBackingStoreConfig(
   return config;
 }
 
-// https://flutter.dev/go/optimized-platform-view-layers
-#define ENABLE_OPTIMIZED_LAYERS 0
-
-#if ENABLE_OPTIMIZED_LAYERS == 1
-
 namespace {
 
 struct PlatformView {
@@ -372,7 +367,8 @@ class LayerBuilder {
 
 };  // namespace
 
-void EmbedderExternalViewEmbedder::SubmitFrame(
+// https://flutter.dev/go/optimized-platform-view-layers
+void EmbedderExternalViewEmbedder::SubmitFrameOptimized(
     GrDirectContext* context,
     std::unique_ptr<SurfaceFrame> frame) {
   SkRect _rect = SkRect::MakeIWH(pending_frame_size_.width(),
@@ -413,10 +409,8 @@ void EmbedderExternalViewEmbedder::SubmitFrame(
   frame->Submit();
 }
 
-#else
-
 // |ExternalViewEmbedder|
-void EmbedderExternalViewEmbedder::SubmitFrame(
+void EmbedderExternalViewEmbedder::SubmitFrameOriginal(
     GrDirectContext* context,
     const std::shared_ptr<impeller::AiksContext>& aiks_context,
     std::unique_ptr<SurfaceFrame> frame) {
@@ -564,6 +558,15 @@ void EmbedderExternalViewEmbedder::SubmitFrame(
   frame->Submit();
 }
 
-#endif
+void EmbedderExternalViewEmbedder::SubmitFrame(
+    GrDirectContext* context,
+    std::unique_ptr<SurfaceFrame> frame) {
+  auto optimized = getenv("FLUTTER_OPTIMIZE_SURFACES");
+  if (!optimized || strcmp(optimized, "1") == 0) {
+    SubmitFrameOptimized(context, std::move(frame));
+  } else {
+    SubmitFrameOriginal(context, std::move(frame));
+  }
+}
 
 }  // namespace flutter

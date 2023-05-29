@@ -100,6 +100,12 @@ class EmbedderExternalViewEmbedder final : public ExternalViewEmbedder {
                    const std::shared_ptr<impeller::AiksContext>& aiks_context,
                    std::unique_ptr<SurfaceFrame> frame) override;
 
+  void SubmitFrameOptimized(GrDirectContext* context,
+                            std::unique_ptr<SurfaceFrame> frame);
+
+  void SubmitFrameOriginal(GrDirectContext* context,
+                           std::unique_ptr<SurfaceFrame> frame);
+
   // |ExternalViewEmbedder|
   DlCanvas* GetRootCanvas() override;
 
