@@ -5,6 +5,7 @@
 #include "flutter/shell/platform/embedder/embedder_external_view_embedder.h"
 
 #include <algorithm>
+#include <cassert>
 #include <utility>
 
 #include "flutter/shell/platform/embedder/embedder_layers.h"
@@ -370,6 +371,7 @@ class LayerBuilder {
 // https://flutter.dev/go/optimized-platform-view-layers
 void EmbedderExternalViewEmbedder::SubmitFrameOptimized(
     GrDirectContext* context,
+    const std::shared_ptr<impeller::AiksContext>& aiks_context,
     std::unique_ptr<SurfaceFrame> frame) {
   SkRect _rect = SkRect::MakeIWH(pending_frame_size_.width(),
                                  pending_frame_size_.height());
@@ -383,7 +385,7 @@ void EmbedderExternalViewEmbedder::SubmitFrameOptimized(
   }
 
   builder.PrepareBackingStore([&](FlutterBackingStoreConfig config) {
-    return create_render_target_callback_(context, config);
+    return create_render_target_callback_(context, aiks_context, config);
   });
 
   if (context) {
@@ -560,12 +562,13 @@ void EmbedderExternalViewEmbedder::SubmitFrameOriginal(
 
 void EmbedderExternalViewEmbedder::SubmitFrame(
     GrDirectContext* context,
+    const std::shared_ptr<impeller::AiksContext>& aiks_context,
     std::unique_ptr<SurfaceFrame> frame) {
   auto optimized = getenv("FLUTTER_OPTIMIZE_SURFACES");
   if (!optimized || strcmp(optimized, "1") == 0) {
-    SubmitFrameOptimized(context, std::move(frame));
+    SubmitFrameOptimized(context, aiks_context, std::move(frame));
   } else {
-    SubmitFrameOriginal(context, std::move(frame));
+    SubmitFrameOriginal(context, aiks_context, std::move(frame));
   }
 }
 
