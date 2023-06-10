@@ -14,6 +14,7 @@
   __weak id<FlutterViewReshapeListener> _reshapeListener;
   FlutterThreadSynchronizer* _threadSynchronizer;
   FlutterSurfaceManager* _surfaceManager;
+  NSCursor* _lastCursor;
 }
 
 @end
@@ -92,13 +93,14 @@
   return YES;
 }
 
+- (void)didUpdateMouseCursor:(NSCursor*)cursor {
+  _lastCursor = cursor;
+}
+
 - (void)cursorUpdate:(NSEvent*)event {
-  // When adding/removing views AppKit will schedule call to current hit-test view
-  // cursorUpdate: at the end of frame to determine possible cursor change. If
-  // the view doesn't implement cursorUpdate: AppKit will set the default (arrow) cursor
-  // instead. This would replace the cursor set by FlutterMouseCursorPlugin.
-  // Empty cursorUpdate: implementation prevents this behavior.
-  // https://github.com/flutter/flutter/issues/111425
+  // Restore mouse cursor. This is called when the mouse cursor is moved outside
+  // of the view or on view hierarchy change.
+  [_lastCursor set];
 }
 
 - (void)viewDidChangeBackingProperties {
