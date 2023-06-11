@@ -14,6 +14,7 @@
 #include "flutter/shell/platform/embedder/embedder.h"
 
 @class FlutterMutatorView;
+@class FlutterCursorCoordinator;
 
 namespace flutter {
 
@@ -71,6 +72,8 @@ class FlutterCompositor {
 
   // Platform view to FlutterMutatorView that contains it.
   NSMapTable<NSView*, FlutterMutatorView*>* mutator_views_;
+
+  NSMapTable<FlutterView*, FlutterCursorCoordinator*>* cursor_coordinators_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterCompositor);
 };

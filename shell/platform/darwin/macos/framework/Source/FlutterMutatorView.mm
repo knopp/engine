@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #import "flutter/shell/platform/darwin/macos/framework/Source/FlutterMutatorView.h"
+#import "flutter/shell/platform/darwin/macos/framework/Source/FlutterView.h"
 
 #include <QuartzCore/QuartzCore.h>
 
@@ -10,6 +11,107 @@
 
 #include "flutter/fml/logging.h"
 #include "flutter/shell/platform/embedder/embedder.h"
+
+#include <objc/runtime.h>
+
+@interface NSCursor (FlutterIgnoreCursorChange)
+
+@property(readwrite, class) BOOL flutterIgnoreCursorChange;
+
+@end
+
+@implementation NSCursor (FlutterIgnoreCursorChange)
+
+static std::atomic_bool flutterIgnoreCursorChange = false;
+
++ (BOOL)flutterIgnoreCursorChange {
+  return flutterIgnoreCursorChange;
+}
+
++ (void)setFlutterIgnoreCursorChange:(BOOL)ignore {
+  flutterIgnoreCursorChange = ignore;
+}
+
+- (void)_flutterSetCursorOverride {
+  if (flutterIgnoreCursorChange) {
+    return;
+  }
+  [self _flutterSetCursorOverride];
+}
+
++ (void)replaceSelector:(SEL)originalSelector
+              fromClass:(Class)originalClass
+           withSelector:(SEL)replacementSelector
+              fromClass:(Class)replacementClass {
+  Method altMethod = class_getInstanceMethod(replacementClass, replacementSelector);
+
+  class_addMethod(originalClass, replacementSelector,
+                  class_getMethodImplementation(replacementClass, replacementSelector),
+                  method_getTypeEncoding(altMethod));
+
+  method_exchangeImplementations(class_getInstanceMethod(originalClass, originalSelector),
+                                 class_getInstanceMethod(originalClass, replacementSelector));
+}
+
++ (void)load {
+  [self replaceSelector:@selector(set)
+              fromClass:[NSCursor class]
+           withSelector:@selector(_flutterSetCursorOverride)
+              fromClass:[NSCursor class]];
+}
+
+@end
+
+@implementation FlutterCursorCoordinator {
+  FlutterView* _flutterView;
+  BOOL _cleanupScheduled;
+  BOOL _cursorOverPlatformView;
+  BOOL _cursorOverFlutterView;
+}
+
+- (FlutterCursorCoordinator*)initWithFlutterView:(FlutterView*)flutterView {
+  if (self = [super init]) {
+    _flutterView = flutterView;
+  }
+  return self;
+}
+
+- (void)frameCleanup {
+  _cleanupScheduled = NO;
+  _cursorOverPlatformView = NO;
+  _cursorOverFlutterView = NO;
+  NSCursor.flutterIgnoreCursorChange = NO;
+}
+
+- (void)processMouseMove:(NSPoint)point
+                   event:(NSEvent*)event
+           overlayRegion:(std::vector<CGRect>&)region
+            platformView:(NSView*)platformView {
+  if (!_cleanupScheduled) {
+    _cleanupScheduled = YES;
+    __weak FlutterCursorCoordinator* weakSelf = self;
+    [[NSRunLoop mainRunLoop] performBlock:^{
+      [weakSelf frameCleanup];
+    }];
+  }
+
+  if (_cursorOverPlatformView || _cursorOverFlutterView) {
+    return;
+  }
+
+  for (const auto& r : region) {
+    if (CGRectContainsPoint(r, point)) {
+      [_flutterView cursorUpdate:event];
+      _cursorOverFlutterView = YES;
+      NSCursor.flutterIgnoreCursorChange = YES;
+      return;
+    }
+  }
+  [platformView.window invalidateCursorRectsForView:platformView];
+  _cursorOverPlatformView = YES;
+}
+
+@end
 
 @interface FlutterMutatorView () {
   // Each of these views clips to a CGPathRef. These views, if present,
@@ -22,6 +124,18 @@
   NSView* _platformViewContainer;
 
   NSView* _platformView;
+
+  FlutterCursorCoordinator* _cursorCoorindator;
+
+  // Container view that hosts the tracking area. Must be above platform view
+  // so that it gets the mouseMove event first.
+  NSView* _trackingAreaContainer;
+
+  // Tracking area used to override update cursor when moving over overlay region.
+  NSTrackingArea* _trackingArea;
+
+  // Region of the overlay that should be ignored for hit testing.
+  std::vector<CGRect> _hitTestIgnoreRegion;
 }
 
 @end
@@ -376,6 +490,15 @@ NSMutableArray* ClipPathFromMutations(CGRect master_clip, const MutationVector& 
 }
 }  // namespace
 
+@interface FlutterTrackingAreaContainer : NSView
+@end
+
+@implementation FlutterTrackingAreaContainer
+- (NSView*)hitTest:(NSPoint)point {
+  return nil;
+}
+@end
+
 @implementation FlutterMutatorView
 
 - (NSView*)platformView {
@@ -391,16 +514,56 @@ NSMutableArray* ClipPathFromMutations(CGRect master_clip, const MutationVector& 
 }
 
 - (instancetype)initWithPlatformView:(NSView*)platformView {
+  return [self initWithPlatformView:platformView cursorCoordiator:nil];
+}
+
+- (instancetype)initWithPlatformView:(NSView*)platformView
+                    cursorCoordiator:(FlutterCursorCoordinator*)coordinator {
   if (self = [super initWithFrame:NSZeroRect]) {
     _platformView = platformView;
     _pathClipViews = [NSMutableArray array];
+    _cursorCoorindator = coordinator;
     self.wantsLayer = YES;
+
+    _trackingAreaContainer = [[FlutterTrackingAreaContainer alloc] initWithFrame:NSZeroRect];
+    [self addSubview:_trackingAreaContainer];
+
+    NSTrackingAreaOptions options = NSTrackingMouseMoved | NSTrackingInVisibleRect |
+                                    NSTrackingEnabledDuringMouseDrag | NSTrackingActiveAlways;
+    _trackingArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                 options:options
+                                                   owner:self
+                                                userInfo:nil];
+    [_trackingAreaContainer addTrackingArea:_trackingArea];
   }
   return self;
 }
 
+- (void)resetHitTestRegion {
+  self->_hitTestIgnoreRegion.clear();
+}
+
+- (void)addHitTestIgnoreRegion:(CGRect)region {
+  self->_hitTestIgnoreRegion.push_back(region);
+}
+
+- (void)mouseMoved:(NSEvent*)event {
+  [_cursorCoorindator processMouseMove:[self convertPoint:event.locationInWindow fromView:nil]
+                                 event:event
+                         overlayRegion:_hitTestIgnoreRegion
+                          platformView:_platformView];
+}
+
 - (NSView*)hitTest:(NSPoint)point {
-  return nil;
+  CGPoint localPoint = point;
+  localPoint.x -= self.frame.origin.x;
+  localPoint.y -= self.frame.origin.y;
+  for (const auto& region : _hitTestIgnoreRegion) {
+    if (CGRectContainsPoint(region, localPoint)) {
+      return nil;
+    }
+  }
+  return [super hitTest:point];
 }
 
 - (BOOL)isFlipped {
@@ -483,6 +646,8 @@ NSMutableArray* ClipPathFromMutations(CGRect master_clip, const MutationVector& 
 /// If clipping to path is needed, CAShapeLayer(s) will be used as mask.
 /// Clipping to round rect only clips to path if round corners are intersected.
 - (void)applyFlutterLayer:(const FlutterLayer*)layer {
+  [_trackingAreaContainer removeFromSuperview];
+
   // Compute the untransformed bounding rect for the platform view in logical pixels.
   // FlutterLayer.size is in physical pixels but Cocoa uses logical points.
   CGFloat scale = [self contentsScale];
@@ -518,6 +683,9 @@ NSMutableArray* ClipPathFromMutations(CGRect master_clip, const MutationVector& 
                    transformedBounds:finalBoundingRect
                            transform:finalTransform
                             clipRect:masterClip];
+
+  [self addSubview:_trackingAreaContainer];
+  _trackingAreaContainer.frame = self.bounds;
 }
 
 @end
