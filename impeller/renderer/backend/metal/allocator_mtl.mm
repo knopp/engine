@@ -213,11 +213,38 @@ std::shared_ptr<Texture> AllocatorMTL::OnCreateTexture(
     }
   }
 
-  auto texture = [device_ newTextureWithDescriptor:mtl_texture_desc];
+  static id mutex = [[NSObject alloc] init];
+  struct Tex {
+    id<MTLTexture> texture;
+  };
+  static std::unordered_multimap<std::string, Tex> textures;
+  auto key = TextureDescriptorToString(desc);
+  id<MTLTexture> texture;
+  @synchronized(mutex) {
+    auto t = textures.find(key);
+    if (t != textures.end()) {
+      texture = t->second.texture;
+      textures.erase(t);
+    }
+    if (texture == nil) {
+      texture = [device_ newTextureWithDescriptor:mtl_texture_desc];
+    }
+  }
   if (!texture) {
     return nullptr;
   }
-  return std::make_shared<TextureMTL>(desc, texture);
+  Tex tex{texture};
+  return std::shared_ptr<TextureMTL>(new TextureMTL(desc, texture),
+                                     [tex, key](TextureMTL* t) {
+                                       @synchronized(mutex) {
+                                         // Just because TextureMTL is released
+                                         // it doesn't necessarily mean that
+                                         // metal is done with the texture. But
+                                         // for the time being we will assume
+                                         // that it is.
+                                         textures.insert({key, tex});
+                                       }
+                                     });
 }
 
 uint16_t AllocatorMTL::MinimumBytesPerRow(PixelFormat format) const {

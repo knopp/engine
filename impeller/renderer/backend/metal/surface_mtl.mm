@@ -89,7 +89,7 @@ static std::optional<RenderTarget> WrapTextureWithRenderTarget(
   resolve_tex->SetLabel("ImpellerOnscreenResolve");
 
   TextureDescriptor msaa_tex_desc;
-  msaa_tex_desc.storage_mode = StorageMode::kDeviceTransient;
+  msaa_tex_desc.storage_mode = StorageMode::kDevicePrivate;
   msaa_tex_desc.type = TextureType::kTexture2DMultisample;
   msaa_tex_desc.sample_count = SampleCount::kCount4;
   msaa_tex_desc.format = resolve_tex->GetTextureDescriptor().format;

@@ -213,7 +213,8 @@ static EntityPassTarget CreateRenderTarget(ContentContext& renderer,
         size,          // size
         "EntityPass",  // label
         RenderTarget::AttachmentConfigMSAA{
-            .storage_mode = StorageMode::kDeviceTransient,
+            .storage_mode = readable ? StorageMode::kDevicePrivate
+                                     : StorageMode::kDeviceTransient,
             .resolve_storage_mode = StorageMode::kDevicePrivate,
             .load_action = LoadAction::kDontCare,
             .store_action = StoreAction::kMultisampleResolve,
