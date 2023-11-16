@@ -185,12 +185,13 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetalSkia::AcquireFrameFromCAMetalLayer(
   framebuffer_info.supports_readback = true;
 
   if (!disable_partial_repaint_) {
-    // Provide accumulated damage to rasterizer (area in current framebuffer that lags behind
-    // front buffer)
-    uintptr_t texture = reinterpret_cast<uintptr_t>(drawable.get().texture);
-    auto i = damage_.find(texture);
-    if (i != damage_.end()) {
-      framebuffer_info.existing_damage = i->second;
+    if (damage_.size() == 3) {
+      framebuffer_info.existing_damage = SkIRect::MakeEmpty();
+      // It is ok to accumulate damage for all framebuffers, because the current
+      // front-buffer has existing damage reset to zero
+      for (auto& entry : damage_) {
+        framebuffer_info.existing_damage->join(entry.second);
+      }
     }
     framebuffer_info.supports_partial_repaint = true;
   }
