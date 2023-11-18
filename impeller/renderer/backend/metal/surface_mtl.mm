@@ -306,9 +306,13 @@ bool SurfaceMTL::Present() const {
       auto drawable = deferred_drawable_->get();
       [drawable present];
     } else {
+      auto start = CACurrentMediaTime();
       auto deferred_drawable = deferred_drawable_;
       [command_buffer addScheduledHandler:^(id<MTLCommandBuffer> _Nonnull) {
         auto drawable = deferred_drawable->get();
+        [drawable addPresentedHandler:^(id<MTLDrawable> d) {
+          NSLog(@"Presentation latency %f", d.presentedTime - start);
+        }];
         [drawable present];
       }];
       [command_buffer commit];
