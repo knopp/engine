@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "impeller/renderer/backend/metal/surface_mtl.h"
+#include <objc/runtime.h>
 
 #include "flutter/fml/trace_event.h"
 #include "flutter/impeller/renderer/command_buffer.h"
@@ -12,6 +13,97 @@
 #include "impeller/renderer/backend/metal/formats_mtl.h"
 #include "impeller/renderer/backend/metal/texture_mtl.h"
 #include "impeller/renderer/render_target.h"
+
+@interface FLTFrameDropper : NSObject {
+  __weak CAMetalLayer* _layer;
+
+  // A drawable that took too long to acquire. What that happens, it means that
+  // CAMetalLayer did not preset frames in time, and because it is not
+  // dropping any drawables, it needs to block until a drawable is available.
+  // When this happens, we'll skip a frame by reusing this drawable for the
+  // next frame.
+  id<CAMetalDrawable> _slowDrawable;
+  id<MTLCommandBuffer> _pendingCommandBuffer;
+
+  // When nextDrawable takes too long, it is possible that next call to it will
+  // also take too long and not reflect the skipped frame.
+  int _slowChecksToSkip;
+}
+
++ (FLTFrameDropper*)forLayer:(CAMetalLayer*)layer;
+
+- (id<CAMetalDrawable>)nextDrawable;
+
+- (void)presentDrawable:(id<MTLDrawable>)drawable
+          commandBuffer:(id<MTLCommandBuffer>)commandBuffer;
+
+@end
+
+@implementation FLTFrameDropper
+
+static char frameDropperKey;
+
++ (FLTFrameDropper*)forLayer:(CAMetalLayer*)layer {
+  FLTFrameDropper* res = objc_getAssociatedObject(layer, &frameDropperKey);
+  if (res == nil) {
+    res = [[FLTFrameDropper alloc] init];
+    res->_layer = layer;
+    objc_setAssociatedObject(layer, &frameDropperKey, res,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+  return res;
+}
+
+- (id<CAMetalDrawable>)nextDrawable {
+  if (_slowDrawable != nil) {
+    // If there is slow drawable available, drop the command buffer and reuse
+    // the drawable for new frame.
+    _pendingCommandBuffer = nil;
+    [NSObject
+        cancelPreviousPerformRequestsWithTarget:self
+                                       selector:@selector(presentSlowDrawable)
+                                         object:nil];
+    id<CAMetalDrawable> res = _slowDrawable;
+    _slowDrawable = nil;
+    return res;
+  } else if (_slowChecksToSkip == 0) {
+    CFTimeInterval start = CACurrentMediaTime();
+    id<CAMetalDrawable> drawable = [_layer nextDrawable];
+    if (CACurrentMediaTime() - start > 0.005) {
+      _slowDrawable = drawable;
+      // Make sure to not skip more than one frame in a row.
+      _slowChecksToSkip = 1;
+    }
+    return drawable;
+  } else {
+    _slowChecksToSkip--;
+    return [_layer nextDrawable];
+  }
+}
+
+- (void)presentSlowDrawable {
+  [_pendingCommandBuffer presentDrawable:_slowDrawable];
+  [_pendingCommandBuffer commit];
+  _pendingCommandBuffer = nil;
+  _slowDrawable = nil;
+}
+
+- (void)presentDrawable:(id<MTLDrawable>)drawable
+          commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
+  if (_slowDrawable == drawable) {
+    _pendingCommandBuffer = commandBuffer;
+    // If the slowDrawable is not requested in one frame, present it. This is to
+    // ensure that we don't drop the last frame in an animation.
+    [self performSelector:@selector(presentSlowDrawable)
+               withObject:nil
+               afterDelay:1.0 / 120.0];
+  } else {
+    [commandBuffer presentDrawable:drawable];
+    [commandBuffer commit];
+  }
+}
+
+@end
 
 namespace impeller {
 
@@ -30,7 +122,8 @@ id<CAMetalDrawable> SurfaceMTL::GetMetalDrawableAndValidate(
   id<CAMetalDrawable> current_drawable = nil;
   {
     TRACE_EVENT0("impeller", "WaitForNextDrawable");
-    current_drawable = [layer nextDrawable];
+    FLTFrameDropper* frameDropper = [FLTFrameDropper forLayer:layer];
+    current_drawable = [frameDropper nextDrawable];
   }
 
   if (!current_drawable) {
@@ -264,8 +357,9 @@ bool SurfaceMTL::Present() const {
       [command_buffer waitUntilScheduled];
       [drawable_ present];
     } else {
-      [command_buffer presentDrawable:drawable_];
-      [command_buffer commit];
+      FLTFrameDropper* frameDropper =
+          [FLTFrameDropper forLayer:drawable_.layer];
+      [frameDropper presentDrawable:drawable_ commandBuffer:command_buffer];
     }
   }
 
