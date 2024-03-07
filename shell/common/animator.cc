@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "flutter/shell/common/animator.h"
+#include <numeric>
 
 #include "flutter/common/constants.h"
 #include "flutter/flow/frame_timings.h"
@@ -58,10 +59,22 @@ void Animator::EnqueueTraceFlowId(uint64_t trace_flow_id) {
       });
 }
 
+static fml::TimePoint _frameRequestPendingBegin;
+
 void Animator::BeginFrame(
     std::unique_ptr<FrameTimingsRecorder> frame_timings_recorder) {
   TRACE_EVENT_ASYNC_END0("flutter", "Frame Request Pending",
                          frame_request_number_);
+
+  uint64_t duration = fml::TimePoint::Now().ToEpochDelta().ToMicroseconds() -
+                      _frameRequestPendingBegin.ToEpochDelta().ToMicroseconds();
+  static std::vector<uint64_t> durations;
+  durations.push_back(duration);
+  uint64_t average =
+      std::reduce(durations.begin(), durations.end()) / durations.size();
+  fprintf(stderr, "\\Frame request pending end %f, average_frame_request_pending_latency: %llu micros\n",
+          _frameRequestPendingBegin.ToEpochDelta().ToMillisecondsF(), average);
+
   frame_request_number_++;
 
   frame_timings_recorder_ = std::move(frame_timings_recorder);
@@ -221,6 +234,11 @@ void Animator::RequestFrame(bool regenerate_layer_trees) {
     // happen.
     TRACE_EVENT_ASYNC_BEGIN0("flutter", "Frame Request Pending",
                              frame_request_number_);
+
+    _frameRequestPendingBegin = fml::TimePoint::Now();
+    fprintf(stderr, "/Frame request pending begin %f\n",
+            _frameRequestPendingBegin.ToEpochDelta().ToMillisecondsF());
+
     regenerate_layer_trees_ = true;
   }
 

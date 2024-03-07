@@ -663,10 +663,15 @@ static void SetThreadPriority(FlutterThreadPriority priority) {
     [engine engineCallbackOnPreEngineRestart];
   };
 
-  flutterArguments.vsync_callback = [](void* user_data, intptr_t baton) {
-    FlutterEngine* engine = (__bridge FlutterEngine*)user_data;
-    [engine onVSync:baton];
-  };
+  auto* disableDisplayLink = getenv("FLUTTER_TEST_DISABLE_DISPLAY_LINK");
+  if (disableDisplayLink != nullptr && strcmp(disableDisplayLink, "1") == 0) {
+    NSLog(@"DisplayLink disabled");
+  } else {
+    flutterArguments.vsync_callback = [](void* user_data, intptr_t baton) {
+      FlutterEngine* engine = (__bridge FlutterEngine*)user_data;
+      [engine onVSync:baton];
+    };
+  }
 
   FlutterRendererConfig rendererConfig = [_renderer createRendererConfig];
   FlutterEngineResult result = _embedderAPI.Initialize(
